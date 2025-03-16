@@ -1,3 +1,3 @@
 docker_repository: "spcleth/xaas"
-ir_type: "llvm"
+ir_type: "llvm-ir"
 parallelism_level: 4
