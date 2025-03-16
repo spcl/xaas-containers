@@ -52,6 +52,7 @@ include = '\.pyi?$'
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+select = ["I"]
 lint.ignore = []
 
 [tool.isort]
