@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xaas"
+version = "0.0.0"
+description = "XaaS (Acceleration as a Service) - build performance-portable containers"
+readme = "README.md"
+authors = [
+    {name = "Marcin Copik", email = "mcopik@gmail.com"}
+]
+license = {text = "BSD 3"}
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "click>=8.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.10.0",
+    "pre-commit>=3.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+xaas = "xaas.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["xaas"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+include = '\.pyi?$'
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+ignore = []
+
+[tool.isort]
+profile = "black"
+force_single_line = "true"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
