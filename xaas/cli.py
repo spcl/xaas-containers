@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import logging
-from typing import Optional
 
 import click
 
@@ -13,7 +12,6 @@ def cli() -> None:
 
 
 def main() -> None:
-    """Main entry point for the CLI."""
     cli()
 
 
