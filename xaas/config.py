@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
-from enum import Enum
 import os
+from enum import Enum
 from pathlib import Path
+
 import yaml
 
 
@@ -12,7 +12,7 @@ class IRType(Enum):
 
 
 class XaaSConfig:
-    _instance: Optional[XaaSConfig] = None
+    _instance: XaaSConfig | None = None
 
     DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
 
@@ -22,7 +22,7 @@ class XaaSConfig:
 
     def __new__(cls) -> XaaSConfig:
         if cls._instance is None:
-            cls._instance = super(XaaSConfig, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._initialized = False
 
         return cls._instance
@@ -40,7 +40,7 @@ class XaaSConfig:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_data = yaml.safe_load(f)
 
         self.docker_repository = config_data["docker_repository"]

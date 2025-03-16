@@ -52,16 +52,28 @@ include = '\.pyi?$'
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-select = ["I"]
+lint.select = [
+    "A",  # flake8-builtins
+    "B",  # flake8-bugbear
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "C4", # flake8-comprehensions
+    "N",  # pep8-naming
+    "SIM",# flake8-simplify,
+    "UP"  # pyupgrade
+]
 lint.ignore = []
 
 [tool.isort]
 profile = "black"
+known_first_party = ["xaas"]
 force_single_line = "true"
 
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+disallow_untyped_defs = false
 disallow_incomplete_defs = true
 

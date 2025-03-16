@@ -1,28 +1,27 @@
 import pytest
 import yaml
-from typing import Dict, Tuple
 
 from xaas.config import XaaSConfig
 
 
 @pytest.fixture
-def resources() -> Tuple[XaaSConfig, Dict]:
-    with open(XaaSConfig.DEFAULT_CONFIGURATION, "r") as f:
+def resources() -> tuple[XaaSConfig, dict]:
+    with open(XaaSConfig.DEFAULT_CONFIGURATION) as f:
         return XaaSConfig(), yaml.safe_load(f)
 
 
-def test_file_not_found(resources: Tuple[XaaSConfig, Dict]):
+def test_file_not_found(resources: tuple[XaaSConfig, dict]):
     with pytest.raises(FileNotFoundError):
         XaaSConfig().initialize("nonexistent_file.yaml")
 
 
-def test_singleton_pattern(resources: Tuple[XaaSConfig, Dict]):
+def test_singleton_pattern(resources: tuple[XaaSConfig, dict]):
     config = XaaSConfig()
 
     assert resources[0] == config
 
 
-def test_load_config(resources: Tuple[XaaSConfig, Dict]):
+def test_load_config(resources: tuple[XaaSConfig, dict]):
     config = XaaSConfig()
     config.initialize(XaaSConfig.DEFAULT_CONFIGURATION)
 
@@ -32,6 +31,6 @@ def test_load_config(resources: Tuple[XaaSConfig, Dict]):
     assert resources[0].parallelism_level == resources[1]["parallelism_level"]
 
 
-def test_initialization_once(resources: Tuple[XaaSConfig, Dict]):
+def test_initialization_once(resources: tuple[XaaSConfig, dict]):
     with pytest.raises(RuntimeError):
         resources[0].initialize("config.yaml")
