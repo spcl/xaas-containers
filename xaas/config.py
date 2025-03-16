@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from typing import Optional
+from enum import Enum
 import os
 from pathlib import Path
 import yaml
 
 
-class Config:
-    _instance: Optional[Config] = None
+class IRType(Enum):
+    LLVM_IR = "llvm-ir"
+
+
+class XaaSConfig:
+    _instance: Optional[XaaSConfig] = None
 
     DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
 
@@ -15,9 +20,9 @@ class Config:
     def initialized(self) -> bool:
         return self._initialized
 
-    def __new__(cls) -> Config:
+    def __new__(cls) -> XaaSConfig:
         if cls._instance is None:
-            cls._instance = super(Config, cls).__new__(cls)
+            cls._instance = super(XaaSConfig, cls).__new__(cls)
             cls._instance._initialized = False
 
         return cls._instance
@@ -25,7 +30,7 @@ class Config:
     def __init__(self):
         self._initialized: bool
         self.docker_repository: str
-        self.ir_type: str
+        self.ir_type: IRType
         self.parallelism_level: int
 
     def initialize(self, config_path: str):
@@ -39,7 +44,12 @@ class Config:
             config_data = yaml.safe_load(f)
 
         self.docker_repository = config_data["docker_repository"]
-        self.ir_type = config_data["ir_type"]
         self.parallelism_level = config_data["parallelism_level"]
+
+        match config_data["ir_type"]:
+            case IRType.LLVM_IR.value:
+                self.ir_type = IRType.LLVM_IR
+            case _:
+                raise ValueError(f"Unsupported IR type: {config_data['ir_type']}")
 
         self._initialized = True
