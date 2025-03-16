@@ -33,7 +33,7 @@ class XaaSConfig:
         self.ir_type: IRType
         self.parallelism_level: int
 
-    def initialize(self, config_path: str):
+    def initialize(self, config_path: str) -> None:
         if self._initialized:
             raise RuntimeError("Configuration already initialized")
 
