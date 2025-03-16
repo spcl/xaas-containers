@@ -35,6 +35,7 @@ dev = [
     "ruff>=0.10.0",
     "pre-commit>=3.0.0",
     "mypy>=1.0.0",
+    "isort>=6.0"
 ]
 
 [project.scripts]
@@ -51,7 +52,7 @@ include = '\.pyi?$'
 [tool.ruff]
 target-version = "py38"
 line-length = 100
-ignore = []
+lint.ignore = []
 
 [tool.isort]
 profile = "black"
