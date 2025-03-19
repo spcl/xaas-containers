@@ -23,11 +23,13 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "click>=8.0.0"
+    "click>=8.0.0",
+    "mashumaro[yaml] >= 3"
 ]
 
 [project.optional-dependencies]
 dev = [
+    "hatch>=1.14",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
