@@ -24,7 +24,8 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "click>=8.0.0",
-    "mashumaro[yaml] >= 3"
+    "mashumaro[yaml] >= 3",
+    "docker >= 7"
 ]
 
 [project.optional-dependencies]
@@ -59,7 +60,6 @@ lint.select = [
     "B",  # flake8-bugbear
     "E",  # pycodestyle errors
     "F",  # pyflakes
-    "I",  # isort
     "C4", # flake8-comprehensions
     "N",  # pep8-naming
     "SIM",# flake8-simplify,
