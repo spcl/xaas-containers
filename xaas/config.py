@@ -77,7 +77,6 @@ class BuildResult(DataClassYAMLMixin):
 
 @dataclass
 class RunConfig(DataClassYAMLMixin):
-
     working_directory: str
     project_name: str
     build_system: BuildSystem
@@ -92,6 +91,10 @@ class RunConfig(DataClassYAMLMixin):
 
         with open(config_path) as f:
             return RunConfig.from_yaml(f)
+
+    def save(self, config_path: str):
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
 
     def add_build_result(self, build_result: BuildResult) -> None:
         self.build_results.append(build_result)
