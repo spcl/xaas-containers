@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
 from pathlib import Path
 
 import yaml
+from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 
 class IRType(Enum):
     LLVM_IR = "llvm-ir"
+
+
+class BuildSystem(Enum):
+    CMAKE = "cmake"
+    AUTOTOOLS = "autotools"
 
 
 class XaaSConfig:
@@ -53,3 +61,37 @@ class XaaSConfig:
                 raise ValueError(f"Unsupported IR type: {config_data['ir_type']}")
 
         self._initialized = True
+
+
+class FeatureType(Enum):
+    OPENMP = "OPENMP"
+    MPI = "MPI"
+    CUDA = "CUDA"
+
+
+@dataclass
+class BuildResult(DataClassYAMLMixin):
+    directory: str
+    features: list[FeatureType]
+
+
+@dataclass
+class RunConfig(DataClassYAMLMixin):
+
+    working_directory: str
+    project_name: str
+    build_system: BuildSystem
+    source_directory: str
+    features: dict[FeatureType, str]
+    build_results: list[BuildResult] = field(default_factory=list)
+
+    @staticmethod
+    def load(config_path: str) -> RunConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return RunConfig.from_yaml(f)
+
+    def add_build_result(self, build_result: BuildResult) -> None:
+        self.build_results.append(build_result)
