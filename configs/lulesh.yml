@@ -3,5 +3,5 @@ source_directory: LULESH
 project_name: LULESH
 build_system: cmake
 features:
-  MPI: WITH_MPI=ON
-  OPENMP: WITH_OPENMP=ON
+  MPI: [WITH_MPI=ON, WITH_MPI=OFF]
+  OPENMP: [WITH_OPENMP=ON, WITH_OPENMP=OFF]

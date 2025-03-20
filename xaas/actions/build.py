@@ -61,7 +61,9 @@ class BuildGenerator(Action):
         return True
 
     @staticmethod
-    def _generate_subsets(features: list[FeatureType]) -> list[list[FeatureType]]:
+    def _generate_subsets(
+        features: list[FeatureType],
+    ) -> list[list[tuple[FeatureType, FeatureType]]]:
         features_count = len(features)
         num_subsets = 2**features_count
         all_subsets = []
@@ -71,10 +73,13 @@ class BuildGenerator(Action):
         """
         for i in range(num_subsets):
             subset = []
+            subset_not_active = []
             for j in range(features_count):
                 if i & (1 << j) > 0:
                     subset.append(features[j])
-            all_subsets.append(subset)
+                else:
+                    subset_not_active.append(features[j])
+            all_subsets.append((subset, subset_not_active))
 
         return all_subsets
 
@@ -88,16 +93,18 @@ class BuildGenerator(Action):
 
         containers = []
 
-        for combination in subsets:
-            build_dir = "_".join([x.value for x in combination])
+        for active, nonactive in subsets:
+            build_dir = "_".join([x.value for x in active])
             new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
             os.makedirs(new_dir, exist_ok=True)
 
             cmake_args = []
-            for arg in combination:
-                cmake_args.append(f"-D{run_config.features[arg]}")
+            for arg in active:
+                cmake_args.append(f"-D{run_config.features[arg][0]}")
+            for arg in nonactive:
+                cmake_args.append(f"-D{run_config.features[arg][1]}")
 
-            logging.info(f"Executing build in {new_dir}, combination: {combination}")
+            logging.info(f"Executing build in {new_dir}, combination: {active}")
 
             configure_cmd = [
                 "cmake",
@@ -117,7 +124,7 @@ class BuildGenerator(Action):
             )
             volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
 
-            res = BuildResult(directory=new_dir, features=combination)
+            res = BuildResult(directory=new_dir, features=active)
 
             containers.append(
                 (

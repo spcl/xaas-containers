@@ -82,7 +82,7 @@ class RunConfig(DataClassYAMLMixin):
     project_name: str
     build_system: BuildSystem
     source_directory: str
-    features: dict[FeatureType, str]
+    features: dict[FeatureType, tuple[str, str]]
 
     @staticmethod
     def load(config_path: str) -> RunConfig:
