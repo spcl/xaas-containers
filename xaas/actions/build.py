@@ -87,7 +87,7 @@ class BuildGenerator(Action):
         build_dir = os.path.join(run_config.working_directory, "build")
 
         # generate all combinations
-        subsets = self._generate_subsets(list(run_config.features.keys()))
+        subsets = self._generate_subsets(list(run_config.features_boolean.keys()))
 
         image = f"{self.xaas_config.docker_repository}:{self.DOCKER_IMAGE}"
 
@@ -100,9 +100,11 @@ class BuildGenerator(Action):
 
             cmake_args = []
             for arg in active:
-                cmake_args.append(f"-D{run_config.features[arg][0]}")
+                cmake_args.append(f"-D{run_config.features_boolean[arg][0]}")
             for arg in nonactive:
-                cmake_args.append(f"-D{run_config.features[arg][1]}")
+                cmake_args.append(f"-D{run_config.features_boolean[arg][1]}")
+            for arg in run_config.additional_args:
+                cmake_args.append(f"-D{arg}")
 
             logging.info(f"Executing build in {new_dir}, combination: {active}")
 
@@ -124,12 +126,16 @@ class BuildGenerator(Action):
             )
             volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
 
-            res = BuildResult(directory=new_dir, features=active)
+            res = BuildResult(directory=new_dir, features_boolean=active)
 
             containers.append(
                 (
                     self.docker_runner.run(
-                        image=image, command=" ".join(configure_cmd), mounts=volumes, remove=False
+                        image=image,
+                        command=" ".join(configure_cmd),
+                        mounts=volumes,
+                        remove=False,
+                        working_dir="/build",
                     ),
                     res,
                 )

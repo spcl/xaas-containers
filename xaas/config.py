@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
 from pathlib import Path
 
@@ -69,10 +70,15 @@ class FeatureType(Enum):
     CUDA = "CUDA"
 
 
+class FeatureSelectionType(Enum):
+    VECTORIZATION = "VECTORIZATION"
+
+
 @dataclass
 class BuildResult(DataClassYAMLMixin):
     directory: str
-    features: list[FeatureType]
+    features_boolean: list[FeatureType]
+    features_select: dict[FeatureSelectionType, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,7 +87,9 @@ class RunConfig(DataClassYAMLMixin):
     project_name: str
     build_system: BuildSystem
     source_directory: str
-    features: dict[FeatureType, tuple[str, str]]
+    features_boolean: dict[FeatureType, tuple[str, str]]
+    features_select: dict[FeatureSelectionType, dict[str, str]]
+    additional_args: list[str]
 
     @staticmethod
     def load(config_path: str) -> RunConfig:

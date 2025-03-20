@@ -23,6 +23,7 @@ class Runner:
         self,
         image: str,
         command: str,
+        working_dir: str,
         mounts: list[VolumeMount] | None = None,
         remove: bool = True,
     ) -> Container:
@@ -40,6 +41,7 @@ class Runner:
                 volumes=volumes if volumes else None,
                 detach=True,
                 remove=remove,
+                working_dir=working_dir,
             )
 
             logging.info(f"Container started with ID: {container.id}")
