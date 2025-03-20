@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
@@ -81,6 +82,25 @@ class BuildAnalyzer(Action):
     def __init__(self):
         super().__init__(name="buildanalyzer", description="Compare all builds")
 
+    def print_summary(self, config: Config) -> None:
+        logging.info(f"Total files: {len(config.build_comparison.source_files)}")
+
+        for build_name, build in config.build_comparison.project_results.items():
+            logging.info(f"Project {build_name}:")
+            logging.info(f"\tFiles {len(build.files)} files")
+
+        differences = defaultdict(set)
+        different_files = set()
+        for src, status in config.build_comparison.source_files.items():
+            for _, project_status in status.divergent_projects.items():
+                for key in project_status.reasons:
+                    differences[key].add(src)
+                    different_files.add(src)
+
+        logging.info(f"Different files: {len(different_files)}")
+        for key, value in differences.items():
+            logging.info(f"Difference: {key}, count: {len(value)}")
+
     def execute(self, build_config: BuildConfig) -> bool:
         logging.info(f"[{self.name}] Analyzing project {build_config.project_name}")
 
@@ -100,6 +120,8 @@ class BuildAnalyzer(Action):
 
         config_path = os.path.join(analyze_config.build.working_directory, "build_analyze.yml")
         analyze_config.save(config_path)
+
+        self.print_summary(analyze_config)
 
         return True
 
