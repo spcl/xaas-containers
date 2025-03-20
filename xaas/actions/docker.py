@@ -33,9 +33,6 @@ class Runner:
                     volumes[mount.source] = {"bind": mount.target, "mode": mount.mode}
             logging.debug(f"Starting container from image '{image}'")
 
-            print(
-                f"{self.uid}:{self.gid}",
-            )
             container = self.client.containers.run(
                 image=image,
                 command=command,

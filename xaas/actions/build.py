@@ -1,5 +1,7 @@
 import logging
 import os
+from dataclasses import dataclass
+from dataclasses import field
 
 from xaas.actions.action import Action
 from xaas.actions.docker import VolumeMount
@@ -7,6 +9,11 @@ from xaas.config import BuildResult
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import RunConfig
+
+
+@dataclass
+class Config(RunConfig):
+    build_results: list[BuildResult] = field(default_factory=list)
 
 
 class BuildGenerator(Action):
@@ -18,12 +25,19 @@ class BuildGenerator(Action):
     def execute(self, run_config: RunConfig) -> bool:
         print(f"[{self.name}] Building project {run_config.project_name}")
 
+        status: bool
+        config_obj = Config.from_instance(run_config)
         if run_config.build_system == BuildSystem.CMAKE:
-            return self._build_cmake(run_config)
+            status = self._build_cmake(config_obj)
         else:
             raise NotImplementedError(
-                f"[{self.name}] Unsupported build system: {run_config.build_system_type}"
+                f"[{self.name}] Unsupported build system: {run_config.build_system}"
             )
+
+        config_path = os.path.join(run_config.working_directory, "buildgen.yml")
+        config_obj.save(config_path)
+
+        return status
 
     def validate(self, run_config: RunConfig) -> bool:
         if not os.path.exists(run_config.source_directory):
@@ -31,7 +45,7 @@ class BuildGenerator(Action):
             return False
 
         if run_config.build_system not in [BuildSystem.CMAKE]:
-            print(f"[{self.name}] Unsupported build system: {run_config.build_system_type}")
+            print(f"[{self.name}] Unsupported build system: {run_config.build_system}")
             return False
 
         return True

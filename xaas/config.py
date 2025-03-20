@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
@@ -82,7 +83,6 @@ class RunConfig(DataClassYAMLMixin):
     build_system: BuildSystem
     source_directory: str
     features: dict[FeatureType, str]
-    build_results: list[BuildResult] = field(default_factory=list)
 
     @staticmethod
     def load(config_path: str) -> RunConfig:
@@ -92,9 +92,11 @@ class RunConfig(DataClassYAMLMixin):
         with open(config_path) as f:
             return RunConfig.from_yaml(f)
 
-    def save(self, config_path: str):
+    def save(self, config_path: str) -> None:
+        print(type(self))
         with open(config_path, "w") as f:
             f.write(self.to_yaml())
 
-    def add_build_result(self, build_result: BuildResult) -> None:
-        self.build_results.append(build_result)
+    @classmethod
+    def from_instance(cls, instance):
+        return cls(**asdict(instance))
