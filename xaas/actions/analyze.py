@@ -1,19 +1,26 @@
 import json
 import logging
 import os
-from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from enum import Enum
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
-from xaas.actions.docker import VolumeMount
-from xaas.config import BuildResult
-from xaas.config import BuildSystem
-from xaas.config import FeatureType
-from xaas.config import RunConfig
+
+
+class DivergenceReason(Enum):
+    COMPILER = "compiler"
+    FLAGS = "flags"
+    INCLUDES = "includes"
+    DEFINITIONS = "definitions"
+    OPTIMIZATIONS = "optimizations"
+    OTHERS = "other"
+
+    def __str__(self):
+        return self.name.lower()
 
 
 @dataclass
@@ -27,16 +34,37 @@ class CompileCommand(DataClassYAMLMixin):
 
 
 @dataclass
-class BuildResult(DataClassYAMLMixin):
-    added_files: dict[str, CompileCommand] = field(default_factory=dict)
-    removed_files: dict[str, CompileCommand] = field(default_factory=dict)
-    different_files: dict[str, CompileCommand] = field(default_factory=dict)
+class ProjectDivergence(DataClassYAMLMixin):
+    project_name: str
+    reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
+
+
+@dataclass
+class SourceFileStatus(DataClassYAMLMixin):
+    """Status of a source file across all projects."""
+
+    default_command: CompileCommand
+    present_in_projects: set[str] = field(default_factory=set)
+    divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
+
+
+@dataclass
+class ProjectResult(DataClassYAMLMixin):
+    """Results from analyzing a single project build."""
+
+    files: dict[str, CompileCommand] = field(default_factory=dict)  # Source file -> compile command
 
 
 @dataclass
 class BuildComparison(DataClassYAMLMixin):
-    shared_files: dict[str, CompileCommand] = field(default_factory=dict)
-    project_results: dict[str, BuildResult] = field(default_factory=dict)
+    """Comparison of builds across all projects."""
+
+    source_files: dict[str, SourceFileStatus] = field(
+        default_factory=dict
+    )  # Source file location -> status
+    project_results: dict[str, ProjectResult] = field(
+        default_factory=dict
+    )  # Project name -> build result
 
 
 @dataclass
@@ -54,7 +82,7 @@ class BuildAnalyzer(Action):
         super().__init__(name="buildanalyzer", description="Compare all builds")
 
     def execute(self, build_config: BuildConfig) -> bool:
-        print(f"[{self.name}] Analyzing project {build_config.project_name}")
+        logging.info(f"[{self.name}] Analyzing project {build_config.project_name}")
 
         self._result = BuildComparison()
 
@@ -65,6 +93,8 @@ class BuildAnalyzer(Action):
 
             self._result.project_results[build.directory] = self._analyze(path_project)
 
+        self._compare_projects()
+
         analyze_config = Config(build_config)
         analyze_config.build_comparison = self._result
 
@@ -73,7 +103,7 @@ class BuildAnalyzer(Action):
 
         return True
 
-    def _analyze(self, path_project: str) -> BuildResult:
+    def _analyze(self, path_project: str) -> ProjectResult:
         project_file = os.path.join(path_project, "compile_commands.json")
         try:
             with open(project_file) as f:
@@ -83,31 +113,118 @@ class BuildAnalyzer(Action):
 
         files = {entry["file"]: entry for entry in data}
 
-        project_result = BuildResult()
+        project_result = ProjectResult()
 
         for file, specification in files.items():
-            cmd = self._parse_command(specification["command"])
+            cmd = self._parse_command(
+                specification["command"], specification["file"], specification["output"]
+            )
             assert cmd
 
-            project_result.added_files[file] = cmd
+            project_result.files[file] = cmd
 
         return project_result
 
+    def _compare_projects(self) -> None:
+        all_files: set[str] = set()
+        for _, build_result in self._result.project_results.items():
+            all_files.update(build_result.files.keys())
+
+        """
+        Logic of comparison:
+        - For each file, we find all projects that use this file.
+        - We take the first project - one with no features - as default build.
+        - Then, for each file in the project, we compare it with the default build.
+
+        The result is the default build and list of all divergences.
+        """
+        for file_path in all_files:
+            projects_with_file = []
+            for project_name, build_result in self._result.project_results.items():
+                if file_path in build_result.files:
+                    projects_with_file.append(project_name)
+
+            assert len(projects_with_file) > 0
+
+            default_project = projects_with_file[0]
+            default_command = self._result.project_results[default_project].files[file_path]
+
+            status = SourceFileStatus(
+                default_command=default_command, present_in_projects=set(projects_with_file)
+            )
+
+            for project_name in projects_with_file[1:]:
+                project_command = self._result.project_results[project_name].files[file_path]
+                divergence = self._find_command_differences(default_command, project_command)
+                if divergence:
+                    status.divergent_projects[project_name] = ProjectDivergence(
+                        project_name=project_name, reasons=divergence
+                    )
+
+            self._result.source_files[file_path] = status
+
+    def _find_command_differences(
+        self, cmd1: CompileCommand, cmd2: CompileCommand
+    ) -> dict[DivergenceReason, dict[str, set[str] | str]] | None:
+        differences: dict[DivergenceReason, dict[str, set[str] | str]] = {}
+
+        if cmd1.compiler != cmd2.compiler:
+            differences[DivergenceReason.COMPILER] = {
+                "added": cmd2.compiler,
+                "removed": cmd1.compiler,
+            }
+
+        flags_diff1 = cmd2.flags - cmd1.flags
+        flags_diff2 = cmd1.flags - cmd2.flags
+        if flags_diff1 or flags_diff2:
+            differences[DivergenceReason.FLAGS] = {"added": flags_diff1, "removed": flags_diff2}
+
+        includes_diff1 = cmd2.includes - cmd1.includes
+        includes_diff2 = cmd1.includes - cmd2.includes
+        if includes_diff1 or includes_diff2:
+            differences[DivergenceReason.INCLUDES] = {
+                "added": includes_diff1,
+                "removed": includes_diff2,
+            }
+
+        defines_diff1 = cmd2.definitions - cmd1.definitions
+        defines_diff2 = cmd1.definitions - cmd2.definitions
+        if defines_diff1 or defines_diff2:
+            differences[DivergenceReason.DEFINITIONS] = {
+                "added": defines_diff1,
+                "removed": defines_diff2,
+            }
+
+        opts_diff1 = cmd2.optimizations - cmd1.optimizations
+        opts_diff2 = cmd1.optimizations - cmd2.optimizations
+        if opts_diff1 or opts_diff2:
+            differences[DivergenceReason.OPTIMIZATIONS] = {
+                "added": opts_diff1,
+                "removed": opts_diff2,
+            }
+
+        others_diff1 = cmd2.others - cmd1.others
+        others_diff2 = cmd1.others - cmd2.others
+        if others_diff1 or others_diff2:
+            differences[DivergenceReason.OTHERS] = {"added": others_diff1, "removed": others_diff2}
+
+        return differences if differences else None
+
     def validate(self, build_config: BuildConfig) -> bool:
         if not os.path.exists(build_config.working_directory):
-            print(
+            logging.error(
                 f"[{self.name}] Working directory does not exist: {build_config.source_directory}"
             )
             return False
 
         if len(build_config.build_results) == 0:
-            print(f"[{self.name}] No builds present!")
+            logging.error(f"[{self.name}] No builds present!")
             return False
 
         return True
 
     @staticmethod
-    def _parse_command(command: str) -> CompileCommand | None:
+    def _parse_command(command: str, source: str, target: str) -> CompileCommand | None:
         elems = command.split()
         if not elems:
             return None
@@ -143,17 +260,19 @@ class BuildAnalyzer(Action):
             # Handle optimization flags
             elif elem.startswith("-O"):
                 result.optimizations.add(elem)
-            # Handle other flags starting with -
-            elif elem.startswith("-"):
-                result.flags.add(elem)
             # Skip output file
             elif elem == "-o":
                 i += 2
                 continue
+            # Handle other flags starting with -f
+            # ignore warnings
+            elif elem.startswith("-f"):
+                result.flags.add(elem)
             # Other arguments
-            else:
+            # catch some outliers
+            # ignore source and target files
+            elif elem not in ["-c", source, target]:
                 result.others.add(elem)
 
             i += 1
-
         return result
