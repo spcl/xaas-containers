@@ -290,6 +290,10 @@ class BuildAnalyzer(Action):
             # ignore warnings
             elif elem.startswith("-f"):
                 result.flags.add(elem)
+            # ignore warnings
+            elif elem.startswith("-W"):
+                i += 1
+                continue
             # Other arguments
             # catch some outliers
             # ignore source and target files
