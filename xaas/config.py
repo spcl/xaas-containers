@@ -93,7 +93,6 @@ class RunConfig(DataClassYAMLMixin):
             return RunConfig.from_yaml(f)
 
     def save(self, config_path: str) -> None:
-        print(type(self))
         with open(config_path, "w") as f:
             f.write(self.to_yaml())
 

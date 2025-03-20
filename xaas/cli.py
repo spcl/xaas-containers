@@ -5,7 +5,9 @@ import os
 
 import click
 
+from xaas.actions.analyze import BuildAnalyzer
 from xaas.actions.build import BuildGenerator
+from xaas.actions.build import Config as BuildConfig
 from xaas.config import RunConfig
 from xaas.config import XaaSConfig
 
@@ -34,8 +36,16 @@ def buildgen(config) -> None:
     action.validate(config_obj)
     action.execute(config_obj)
 
-    config_path = os.path.join(config_obj.working_directory, "result.yml")
-    config_obj.save(config_path)
+
+@cli.command()
+@click.argument("config", type=click.Path(exists=True))
+def analyze(config) -> None:
+    initialize()
+
+    config_obj = BuildConfig.load(config)
+    action = BuildAnalyzer()
+    action.validate(config_obj)
+    action.execute(config_obj)
 
 
 def main() -> None:

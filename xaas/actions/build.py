@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 from dataclasses import dataclass
@@ -14,6 +16,14 @@ from xaas.config import RunConfig
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
+
+    @staticmethod
+    def load(config_path: str) -> Config:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return Config.from_yaml(f)
 
 
 class BuildGenerator(Action):

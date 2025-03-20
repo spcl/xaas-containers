@@ -7,8 +7,12 @@ from xaas.config import XaaSConfig
 
 
 class Action(ABC):
+    @property
+    def name(self) -> str:
+        return self._name
+
     def __init__(self, name: str, description: str):
-        self.name = name
+        self._name = name
         self.description = description
         self.xaas_config = XaaSConfig()
         self.docker_runner = DockerRunner()
