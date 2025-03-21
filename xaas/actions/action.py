@@ -15,7 +15,7 @@ class Action(ABC):
         self._name = name
         self.description = description
         self.xaas_config = XaaSConfig()
-        self.docker_runner = DockerRunner()
+        self.docker_runner = DockerRunner(self.xaas_config.docker_repository)
 
     @abstractmethod
     def execute(self, run_config: RunConfig) -> bool:

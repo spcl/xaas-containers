@@ -14,10 +14,11 @@ class VolumeMount:
 
 
 class Runner:
-    def __init__(self):
+    def __init__(self, docker_repository: str):
         self.client = docker.from_env()
         self.uid = os.getuid()
         self.gid = os.getgid()
+        self.docker_repository = docker_repository
 
     def run(
         self,
@@ -25,7 +26,9 @@ class Runner:
         command: str,
         working_dir: str,
         mounts: list[VolumeMount] | None = None,
+        detach: bool = True,
         remove: bool = True,
+        tty: bool = False,
     ) -> Container:
         try:
             volumes = {}
@@ -34,13 +37,16 @@ class Runner:
                     volumes[mount.source] = {"bind": mount.target, "mode": mount.mode}
             logging.debug(f"Starting container from image '{image}'")
 
+            image = f"{self.docker_repository}:{image}"
+
             container = self.client.containers.run(
                 image=image,
                 command=command,
                 user=f"{self.uid}:{self.gid}",
-                volumes=volumes if volumes else None,
-                detach=True,
+                volumes=volumes,
+                detach=detach,
                 remove=remove,
+                tty=tty,
                 working_dir=working_dir,
             )
 
@@ -50,6 +56,15 @@ class Runner:
         except docker.errors.ImageNotFound:
             logging.error(f"Image not found: {image}")
             raise
+        except docker.errors.APIError as e:
+            logging.error(f"Docker API error: {str(e)}")
+            raise
+
+    def exec_run(
+        self, container: Container, command: list[str], working_dir: str
+    ) -> tuple[int, str]:
+        try:
+            return container.exec_run(command, workdir=working_dir)
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise

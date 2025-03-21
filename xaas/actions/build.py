@@ -89,8 +89,6 @@ class BuildGenerator(Action):
         # generate all combinations
         subsets = self._generate_subsets(list(run_config.features_boolean.keys()))
 
-        image = f"{self.xaas_config.docker_repository}:{self.DOCKER_IMAGE}"
-
         containers = []
 
         for active, nonactive in subsets:
@@ -118,7 +116,7 @@ class BuildGenerator(Action):
                 "-B",
                 "/build",
             ]
-            print(f"[{self.name}] Running: {' '.join(configure_cmd)}")
+            logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
 
             volumes = []
             volumes.append(
@@ -131,7 +129,7 @@ class BuildGenerator(Action):
             containers.append(
                 (
                     self.docker_runner.run(
-                        image=image,
+                        image=self.DOCKER_IMAGE,
                         command=" ".join(configure_cmd),
                         mounts=volumes,
                         remove=False,
