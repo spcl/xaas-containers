@@ -1,0 +1,14 @@
+working_directory: gromacs-builds
+source_directory: gromacs
+project_name: gromacs
+build_system: cmake
+features_select:
+  VECTORIZATION:
+    SSE4.1: GMX_SIMD=SSE4.1
+features_boolean:
+  MPI: [GMX_MPI=ON, GMX_MPI=OFF]
+  OPENMP: [GMX_OPENMP=ON, GMX_OPENMP=OFF]
+  CUDA: [GMX_GPU=CUDA, GMX_GPU=OFF]
+additional_args:
+  - GMX_BUILD_OWN_FFTW=ON
+  - CMAKE_CUDA_ARCHITECTURES=70
