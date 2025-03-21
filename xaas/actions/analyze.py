@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -26,6 +28,8 @@ class DivergenceReason(Enum):
 
 @dataclass
 class CompileCommand(DataClassYAMLMixin):
+    target: str
+    build_dir: str
     compiler: str
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
@@ -38,6 +42,7 @@ class CompileCommand(DataClassYAMLMixin):
 class ProjectDivergence(DataClassYAMLMixin):
     project_name: str
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
+    hash: str | None = None
 
 
 @dataclass
@@ -47,6 +52,7 @@ class SourceFileStatus(DataClassYAMLMixin):
     default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
+    hash: str | None = None
 
 
 @dataclass
@@ -76,6 +82,14 @@ class Config(DataClassYAMLMixin):
     def save(self, config_path: str) -> None:
         with open(config_path, "w") as f:
             f.write(self.to_yaml())
+
+    @staticmethod
+    def load(config_path: str) -> Config:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return Config.from_yaml(f)
 
 
 class BuildAnalyzer(Action):
@@ -139,7 +153,10 @@ class BuildAnalyzer(Action):
 
         for file, specification in files.items():
             cmd = self._parse_command(
-                specification["command"], specification["file"], specification["output"]
+                specification["command"],
+                specification["file"],
+                specification["output"],
+                specification["directory"],
             )
             assert cmd
 
@@ -246,12 +263,14 @@ class BuildAnalyzer(Action):
         return True
 
     @staticmethod
-    def _parse_command(command: str, source: str, target: str) -> CompileCommand | None:
+    def _parse_command(
+        command: str, source: str, target: str, build_dir: str
+    ) -> CompileCommand | None:
         elems = command.split()
         if not elems:
             return None
 
-        result = CompileCommand(elems[0])
+        result = CompileCommand(target, build_dir, elems[0])
 
         i = 1
         while i < len(elems):
