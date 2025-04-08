@@ -107,7 +107,9 @@ class BuildGenerator(Action):
             logging.info(f"Executing build in {new_dir}, combination: {active}")
 
             configure_cmd = [
-                "cmake",
+                "bash",
+                "-c",
+                "'cmake",
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                 *cmake_args,
@@ -115,7 +117,12 @@ class BuildGenerator(Action):
                 "/source",
                 "-B",
                 "/build",
+                "&&",
+                "cd /build ",
             ]
+            for additional_step in run_config.additional_steps:
+                configure_cmd.append(f"&& {additional_step}")
+            configure_cmd.append("'")
             logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
 
             volumes = []

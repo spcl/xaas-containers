@@ -90,6 +90,7 @@ class RunConfig(DataClassYAMLMixin):
     features_boolean: dict[FeatureType, tuple[str, str]]
     features_select: dict[FeatureSelectionType, dict[str, str]]
     additional_args: list[str]
+    additional_steps: list[str]
 
     @staticmethod
     def load(config_path: str) -> RunConfig:
