@@ -1,23 +1,75 @@
+from __future__ import annotations
+
 import logging
 import os
 from collections import defaultdict, namedtuple
+from enum import Enum
 from hashlib import md5
-from mmap import ACCESS_READ
-from mmap import mmap
 from pathlib import Path
+from mmap import ACCESS_READ, mmap
+from dataclasses import dataclass, field
 
 import tqdm
 from docker.models.containers import Container
+from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 from xaas.actions.action import Action
-from xaas.actions.analyze import FileStatus
-from xaas.actions.analyze import CompileCommand
-from xaas.actions.analyze import Config as AnalyzerConfig
-from xaas.actions.analyze import DivergenceReason
-from xaas.actions.analyze import SourceFileStatus
+from xaas.actions.analyze import (
+    CompileCommand,
+    Config as AnalyzerConfig,
+    DivergenceReason,
+    SourceFileStatus,
+    ProjectDivergence,
+)
 from xaas.actions.docker import VolumeMount
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, process
+
+
+class IRStatus(Enum):
+    SHARED_IR = "shared"
+    INDIVIDUAL_IR = "individual"
+    SOURCE = "source"
+
+    def __str__(self):
+        return self.name.lower()
+
+
+@dataclass
+class FileStatus(DataClassYAMLMixin):
+    # command: CompileCommand
+    cmd_differences: ProjectDivergence
+    hash: str | None = None
+    has_omp: bool = False
+    ir_file: str | None = None
+    ir_file_status: IRStatus = IRStatus.SOURCE
+
+
+@dataclass
+class ProcessedResults(DataClassYAMLMixin):
+    baseline_project: str
+    baseline_command: CompileCommand
+    # Mapping: hash -> list of [(config, path)]
+    # We use to decide when two file with the same hash are compatible with each other
+    ir_files: dict[str, list[tuple[ProjectDivergence, str]]] = field(default_factory=dict)
+    projects: dict[str, FileStatus] = field(default_factory=dict)
+
+
+@dataclass
+class PreprocessingResult(DataClassYAMLMixin):
+    source_files: dict[str, ProcessedResults] = field(default_factory=dict)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @staticmethod
+    def load(config_path: str) -> PreprocessingResult:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return PreprocessingResult.from_yaml(f)
 
 
 class ClangPreprocesser(Action):
@@ -32,36 +84,35 @@ class ClangPreprocesser(Action):
         self.CLANG_PATH = "/usr/bin/clang++-19"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
-    def print_summary(self, config: AnalyzerConfig) -> None:
-        logging.info(f"Total files: {len(config.build_comparison.source_files)}")
-
-        for build_name, build in config.build_comparison.project_results.items():
-            logging.info(f"Project {build_name}:")
-            logging.info(f"\tFiles {len(build.files)} files")
+    def print_summary(self, config: PreprocessingResult) -> None:
+        logging.info(f"Total files: {len(config.source_files)}")
 
         differences = defaultdict(set)
         different_files = set()
         difference_identical_hash = defaultdict(set)
         identical_hash_different_flags = set()
         identical_after_processing = set()
-        for src, status in config.build_comparison.source_files.items():
-            hash_val = status.hash
+        for src, status in config.source_files.items():
+            hash_val = status.projects[status.baseline_project].hash
 
-            for _, project_status in status.divergent_projects.items():
+            for project_name, project_status in status.projects.items():
+                if project_name == status.baseline_project:
+                    continue
+
                 if hash_val == project_status.hash and (
                     len(
-                        set(project_status.reasons.keys())
+                        set(project_status.cmd_differences.reasons.keys())
                         - {DivergenceReason.DEFINITIONS, DivergenceReason.INCLUDES}
                     )
                     == 0
                 ):
                     identical_after_processing.add(src)
                 elif hash_val == project_status.hash:
-                    for key in project_status.reasons:
+                    for key in project_status.cmd_differences.reasons:
                         difference_identical_hash[key].add(src)
                         identical_hash_different_flags.add(src)
                 else:
-                    for key in project_status.reasons:
+                    for key in project_status.cmd_differences.reasons:
                         differences[key].add(src)
                         different_files.add(src)
 
@@ -83,128 +134,143 @@ class ClangPreprocesser(Action):
         Container = namedtuple("Container", ["container", "working_dir"])  # noqa: F821
         containers = {}
 
-        for build in config.build.build_results:
-            logging.info(f"Analyzing build {build}")
+        new_results = PreprocessingResult()
 
-            volumes = []
-            volumes.append(
-                VolumeMount(
-                    source=os.path.realpath(config.build.source_directory), target="/source"
-                )
-            )
+        try:
+            for build in config.build.build_results:
+                logging.info(f"Analyzing build {build}")
 
-            build_dir = os.path.basename(build.directory)
-            target = f"/builds/{build_dir}"
-            volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
-
-            containers[build.directory] = Container(
-                self.docker_runner.run(
-                    command="/bin/bash",
-                    image=self.DOCKER_IMAGE,
-                    mounts=volumes,
-                    remove=False,
-                    detach=True,
-                    tty=True,
-                    working_dir=target,
-                ),
-                target,
-            )
-
-        baseline_project = config.build.build_results[0].directory
-
-        futures = []
-        results = []
-
-        all_projects = list(config.build_comparison.source_files.items())
-
-        size = 0
-        for _, status in all_projects:
-            size += 1 + len(status.divergent_projects)
-
-        with tqdm.tqdm(total=size) as pbar:  # noqa: SIM117
-            with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                for src, status in tqdm.tqdm(all_projects):
-                    if len(status.divergent_projects) == 0:
-                        continue
-
-                    # FIXME: disable building of MPI files
-
-                    cmd = config.build_comparison.project_results[baseline_project].files[src]
-                    status.ir_file_status = FileStatus.INDIVIDUAL_IR
-                    futures.append(
-                        executor.submit(
-                            self._preprocess_file,
-                            containers[baseline_project].container,
-                            src,
-                            cmd,
-                            containers[baseline_project].working_dir,
-                        )
+                volumes = []
+                volumes.append(
+                    VolumeMount(
+                        source=os.path.realpath(config.build.source_directory), target="/source"
                     )
+                )
 
-                    for name, div_status in status.divergent_projects.items():
-                        cmd = config.build_comparison.project_results[name].files[src]
+                build_dir = os.path.basename(build.directory)
+                target = f"/builds/{build_dir}"
+                volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
 
-                        div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
+                containers[build.directory] = Container(
+                    self.docker_runner.run(
+                        command="/bin/bash",
+                        image=self.DOCKER_IMAGE,
+                        mounts=volumes,
+                        remove=False,
+                        detach=True,
+                        tty=True,
+                        working_dir=target,
+                    ),
+                    target,
+                )
+
+            baseline_project = config.build.build_results[0].directory
+
+            futures = []
+            results = []
+
+            all_projects = list(config.build_comparison.source_files.items())
+
+            size = 0
+            for _, status in all_projects:
+                size += 1 + len(status.divergent_projects)
+
+            with tqdm.tqdm(total=size) as pbar:  # noqa: SIM117
+                with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
+                    for src, status in tqdm.tqdm(all_projects):
+                        # new_results.source_files[src] =
+                        #
+                        process_result = ProcessedResults(
+                            baseline_project=status.default_build,
+                            baseline_command=status.default_command,
+                        )
+                        process_result.projects[status.default_build] = FileStatus(
+                            ProjectDivergence()
+                        )
+
+                        if len(status.divergent_projects) == 0:
+                            continue
+
+                        # FIXME: disable building of MPI files
+
+                        cmd = config.build_comparison.project_results[baseline_project].files[src]
                         futures.append(
                             executor.submit(
                                 self._preprocess_file,
-                                containers[name].container,
+                                containers[baseline_project].container,
                                 src,
                                 cmd,
-                                containers[name].working_dir,
+                                containers[baseline_project].working_dir,
                             )
                         )
 
-                for future in futures:
-                    pbar.update(1)
-                    results.append(future.result())
+                        for name, div_status in status.divergent_projects.items():
+                            cmd = config.build_comparison.project_results[name].files[src]
 
-        result_iter = iter(results)
-        for src, status in all_projects:
-            if len(status.divergent_projects) == 0:
-                logging.debug(f"Skipping {src}, no differences found")
-                continue
+                            process_result.projects[name] = FileStatus(div_status)
+                            # div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
+                            futures.append(
+                                executor.submit(
+                                    self._preprocess_file,
+                                    containers[name].container,
+                                    src,
+                                    cmd,
+                                    containers[name].working_dir,
+                                )
+                            )
 
-            logging.debug(f"Preprocess baseline {src}")
-            cmd = config.build_comparison.project_results[baseline_project].files[src]
+                        new_results.source_files[src] = process_result
 
-            original_processed_file = next(result_iter)
-            if not original_processed_file:
-                logging.error("Skip because of an error")
+                    for future in futures:
+                        pbar.update(1)
+                        results.append(future.result())
 
-                # drop results
-                for _ in range(len(status.divergent_projects)):
-                    next(result_iter)
+            result_iter = iter(results)
+            for src, status in all_projects:
+                if len(status.divergent_projects) == 0:
+                    logging.debug(f"Skipping {src}, no differences found")
+                    continue
 
-                continue
+                logging.debug(f"Preprocess baseline {src}")
+                cmd = config.build_comparison.project_results[baseline_project].files[src]
 
-            success = []
-            for name, _ in status.divergent_projects.items():
-                logging.debug(f"Preprocess {src} for project {name}")
+                original_processed_file = next(result_iter)
+                if not original_processed_file:
+                    logging.error("Skip because of an error")
 
-                cmd = config.build_comparison.project_results[name].files[src]
+                    # drop results
+                    for _ in range(len(status.divergent_projects)):
+                        next(result_iter)
 
-                processed_file = next(result_iter)
-                if processed_file:
-                    success.append((name, *processed_file))
+                    continue
 
-            self._compare_preprocessed_files(
-                src,
-                (baseline_project, *original_processed_file),
-                success,
-                config.build_comparison.source_files[src],
-            )
+                success = []
+                for name, _ in status.divergent_projects.items():
+                    logging.debug(f"Preprocess {src} for project {name}")
 
-            if self.openmp_check:
-                self._optimize_omp(src, config.build_comparison.source_files[src])
+                    cmd = config.build_comparison.project_results[name].files[src]
 
-        for container in containers.values():
-            container.container.stop(timeout=0)
+                    processed_file = next(result_iter)
+                    if processed_file:
+                        success.append((name, *processed_file))
+
+                self._compare_preprocessed_files(
+                    src,
+                    (baseline_project, *original_processed_file),
+                    success,
+                    new_results.source_files[src],
+                )
+
+                # if self.openmp_check:
+                #    self._optimize_omp(src, config.build_comparison.source_files[src])
+        finally:
+            for container in containers.values():
+                container.container.stop(timeout=0)
 
         config_path = os.path.join(config.build.working_directory, "preprocess.yml")
-        config.save(config_path)
+        new_results.save(config_path)
 
-        self.print_summary(config)
+        self.print_summary(new_results)
 
     def _preprocess_file(
         self, container: Container, source_file: str, command: CompileCommand, working_dir: str
@@ -254,20 +320,20 @@ class ClangPreprocesser(Action):
         src: str,
         original_processed_file: tuple[str, str, bool],
         processed_files: list[tuple[str, str, bool]],
-        result: SourceFileStatus,
+        result: ProcessedResults,
     ):
         logging.debug(f"Comparing preprocessed files for {src}")
 
         original_path = os.path.join(*original_processed_file[0:2])
-        result.hash = self._hash_file(original_path)
-        result.has_omp = original_processed_file[2]
+        result.projects[original_processed_file[0]].hash = self._hash_file(original_path)
+        result.projects[original_processed_file[0]].has_omp = original_processed_file[2]
         os.remove(original_path)
 
         for processed_file in processed_files:
             new_path = os.path.join(*processed_file[0:2])
 
-            result.divergent_projects[processed_file[0]].hash = self._hash_file(new_path)
-            result.divergent_projects[processed_file[0]].has_omp = processed_file[2]
+            result.projects[processed_file[0]].hash = self._hash_file(new_path)
+            result.projects[processed_file[0]].has_omp = processed_file[2]
             os.remove(new_path)
 
     def _optimize_omp(
@@ -314,7 +380,7 @@ class ClangPreprocesser(Action):
                     f"For source file {src}, the project {name} differs only in OpenMP flag - but not OpenMP present!"
                 )
                 # to_delete.append(name)
-                divergent_project.ir_file_status = FileStatus.SHARED_IR
+                # divergent_project.ir_file_status = FileStatus.SHARED_IR
 
         # for del_key in to_delete:
         #    print("Delete", src, del_key)

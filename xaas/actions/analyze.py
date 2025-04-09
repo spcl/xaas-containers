@@ -40,23 +40,26 @@ class CompileCommand(DataClassYAMLMixin):
 
 @dataclass
 class ProjectDivergence(DataClassYAMLMixin):
-    project_name: str
+    # project_name: str
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
-    hash: str | None = None
-    has_omp: bool = False
-    ir_file: str | None = None
+    # hash: str | None = None
+    # has_omp: bool = False
+    # ir_file: str | None = None
+    # ir_file_status: FileStatus = FileStatus.SOURCE
 
 
 @dataclass
 class SourceFileStatus(DataClassYAMLMixin):
     """Status of a source file across all projects."""
 
+    default_build: str
     default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
-    hash: str | None = None
-    has_omp: bool = False
-    ir_file: str | None = None
+    # hash: str | None = None
+    # has_omp: bool = False
+    # ir_file: str | None = None
+    # ir_file_status: FileStatus = FileStatus.SOURCE
 
 
 @dataclass
@@ -127,8 +130,6 @@ class BuildAnalyzer(Action):
         for build in build_config.build_results:
             logging.info(f"Analyzing build {build}")
 
-            print(build_config.working_directory)
-            print(build.directory)
             # path_project = os.path.join(build_config.working_directory, "build", build.directory)
             path_project = build.directory
 
@@ -196,16 +197,16 @@ class BuildAnalyzer(Action):
             default_command = self._result.project_results[default_project].files[file_path]
 
             status = SourceFileStatus(
-                default_command=default_command, present_in_projects=set(projects_with_file)
+                default_build=default_project,
+                default_command=default_command,
+                present_in_projects=set(projects_with_file),
             )
 
             for project_name in projects_with_file[1:]:
                 project_command = self._result.project_results[project_name].files[file_path]
                 divergence = self._find_command_differences(default_command, project_command)
                 if divergence:
-                    status.divergent_projects[project_name] = ProjectDivergence(
-                        project_name=project_name, reasons=divergence
-                    )
+                    status.divergent_projects[project_name] = ProjectDivergence(reasons=divergence)
 
             self._result.source_files[file_path] = status
 
