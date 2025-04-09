@@ -10,6 +10,7 @@ from docker.models.containers import RUN_CREATE_KWARGS, Container
 
 from xaas.actions.action import Action
 from xaas.actions.analyze import CompileCommand
+from xaas.actions.preprocess import ProcessedResults, ProjectDivergence, DivergenceReason
 from xaas.actions.preprocess import PreprocessingResult, IRStatus, FileStatus
 from xaas.actions.docker import VolumeMount
 
@@ -109,7 +110,6 @@ class IRCompiler(Action):
         futures = []
         results = []
 
-        file_builds = {}
         with tqdm.tqdm(total=total_tasks) as pbar:  # noqa: SIM117
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 for src, status in config.source_files.items():
@@ -118,59 +118,64 @@ class IRCompiler(Action):
 
                     logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
 
-                    file_builds[src] = set()
+                    ir_path, is_new = self._find_id(
+                        status.projects[status.baseline_project],
+                        status.baseline_command,
+                        status,
+                    )
+                    assert is_new
 
-                    cmd = status.baseline_command
                     futures.append(
                         executor.submit(
                             self._compile_ir,
                             containers[baseline_project],
                             src,
-                            cmd,
+                            status.baseline_command,
                             cmake_cmd,
-                            status.projects[status.baseline_project],
-                            "",
+                            ir_path,
                             config.build.working_directory,
                         )
                     )
 
-                    for project_name, status in status.projects.items():
+                    for project_name, project_status in status.projects.items():
                         if project_name == baseline_project:
                             continue
 
-                        cmake_cmd = compile_dbs[project_name][src]["command"]
-
-                        if (
-                            status.hash in file_builds
-                            and status.ir_file_status == FileStatus.SHARED_IR
-                        ):
+                        ir_path, is_new = self._find_id(
+                            project_status,
+                            status.baseline_command,
+                            status,
+                        )
+                        if not is_new:
                             logging.info(
                                 f"[{self.name}] Skip building shared IR file {src} for {project_name}"
                             )
-                            results.append(None)
+                            futures.append(ir_path)
                             continue
 
-                        # file_builds.add(status.hash)
+                        cmake_cmd = compile_dbs[project_name][src]["command"]
 
                         futures.append(
                             executor.submit(
                                 self._compile_ir,
                                 containers[project_name],
                                 src,
-                                cmd,
+                                status.baseline_command,
                                 cmake_cmd,
-                                status,
-                                project_name,
+                                ir_path,
                                 config.build.working_directory,
                             )
                         )
 
                 for future in as_completed(futures):
                     pbar.update(1)
-                    results.append(future.result())
+                    if isinstance(future, str):
+                        results.append(future)
+                    else:
+                        results.append(future.result())
 
         result_iter = iter(results)
-        for src, status in config.source_files.items():
+        for _, status in config.source_files.items():
             baseline_result = next(result_iter)
             if baseline_result:
                 status.projects[status.baseline_project].ir_file = baseline_result
@@ -195,34 +200,83 @@ class IRCompiler(Action):
 
         return True
 
+    @staticmethod
+    def _divergence_equal(old: ProjectDivergence, new: ProjectDivergence) -> bool:
+        for reason in [
+            DivergenceReason.COMPILER,
+            DivergenceReason.OPTIMIZATIONS,
+            DivergenceReason.FLAGS,
+            DivergenceReason.OTHERS,
+        ]:
+            if reason in old.reasons and reason in new.reasons:
+                if old.reasons[reason] != new.reasons[reason]:
+                    return False
+            elif reason in old.reasons or reason in new.reasons:
+                return False
+
+        return True
+
+    def _find_id(
+        self,
+        status: FileStatus,
+        baseline_command: CompileCommand,
+        process_results: ProcessedResults,
+    ) -> tuple[str, bool]:
+        file_hash = status.hash
+        assert file_hash is not None
+
+        current_divergence = status.cmd_differences
+        if file_hash not in process_results.ir_files:
+            path = self._generate_ir_path(status, baseline_command, 0)
+            process_results.ir_files[file_hash] = [(current_divergence, path)]
+            return (path, True)
+        else:
+            # This hash exists, check existing objects for it.
+            existing_statuses = process_results.ir_files[file_hash]
+            for existing_hash in existing_statuses:
+                existing_divergence = existing_hash[0]
+
+                if self._divergence_equal(current_divergence, existing_divergence):
+                    return (existing_hash[1], False)
+
+            path = self._generate_ir_path(status, baseline_command, len(existing_statuses))
+            process_results.ir_files[file_hash].append((current_divergence, path))
+            return (path, True)
+
+    def _generate_ir_path(
+        self,
+        status: FileStatus,
+        baseline_command: CompileCommand,
+        id: int,
+    ) -> str:
+        # location?
+        # for first file, we put in /irs/<cmake-target>/hash/0/
+        # what if the file is still different because of flags?
+        # for every other, we put in /irs/<cmake-target>/hash/<id>
+
+        ir_file = str(os.path.basename(Path(baseline_command.target).with_suffix(".bc")))
+
+        assert status.hash is not None
+        ir_path = os.path.join(status.hash, str(id), ir_file)
+
+        return ir_path
+
     def _compile_ir(
         self,
         container: Container,
         source_file: str,
         baseline_command: CompileCommand,
         cmake_cmd: str,
-        status: FileStatus,
-        project_name: str,
+        ir_path: str,
+        # ir_target: str,
         working_directory: str,
     ) -> str | None:
-        # filename = os.path.basename(command.target)
-        ir_file = str(os.path.basename(Path(baseline_command.target).with_suffix(".bc")))
+        ir_target = os.path.join("/irs", baseline_command.target, ir_path)
 
-        # location?
-        # for shared file, we put in /irs/file/common/hash/
-        # for individual, we put in /irs/file/<project-name>/hash/
-
-        assert status.hash is not None
-
-        if status.ir_file_status == IRStatus.SHARED_IR:
-            ir_path = os.path.join("common", status.hash)
-        else:
-            ir_path = os.path.join(project_name, status.hash)
-        ir_target = os.path.join("/irs", baseline_command.target, ir_path, ir_file)
         local_ir_target = os.path.join(
             working_directory, self.IR_PATH, baseline_command.target, ir_path
         )
-        os.makedirs(local_ir_target, exist_ok=True)
+        os.makedirs(os.path.dirname(local_ir_target), exist_ok=True)
 
         ir_cmd = cmake_cmd.replace(baseline_command.target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
