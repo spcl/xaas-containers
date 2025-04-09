@@ -15,6 +15,7 @@ from docker.models.containers import Container
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 from xaas.actions.action import Action
+from xaas.actions.build import Config as BuildConfig
 from xaas.actions.analyze import (
     CompileCommand,
     Config as AnalyzerConfig,
@@ -58,6 +59,7 @@ class ProcessedResults(DataClassYAMLMixin):
 
 @dataclass
 class PreprocessingResult(DataClassYAMLMixin):
+    build: BuildConfig = field(default_factory=BuildConfig)
     source_files: dict[str, ProcessedResults] = field(default_factory=dict)
 
     def save(self, config_path: str) -> None:
@@ -144,7 +146,7 @@ class ClangPreprocesser(Action):
         Container = namedtuple("Container", ["container", "working_dir"])  # noqa: F821
         containers = {}
 
-        new_results = PreprocessingResult()
+        new_results = PreprocessingResult(build=config.build)
 
         try:
             for build in config.build.build_results:
