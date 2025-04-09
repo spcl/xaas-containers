@@ -43,6 +43,8 @@ class ProjectDivergence(DataClassYAMLMixin):
     project_name: str
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
     hash: str | None = None
+    has_omp: bool = False
+    ir_file: str | None = None
 
 
 @dataclass
@@ -53,6 +55,8 @@ class SourceFileStatus(DataClassYAMLMixin):
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
     hash: str | None = None
+    has_omp: bool = False
+    ir_file: str | None = None
 
 
 @dataclass
@@ -123,7 +127,10 @@ class BuildAnalyzer(Action):
         for build in build_config.build_results:
             logging.info(f"Analyzing build {build}")
 
-            path_project = os.path.join(build_config.working_directory, "build", build.directory)
+            print(build_config.working_directory)
+            print(build.directory)
+            # path_project = os.path.join(build_config.working_directory, "build", build.directory)
+            path_project = build.directory
 
             self._result.project_results[build.directory] = self._analyze(path_project)
 

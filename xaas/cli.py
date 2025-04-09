@@ -6,6 +6,7 @@ import click
 
 from xaas.actions.analyze import BuildAnalyzer
 from xaas.actions.analyze import Config as AnalyzerConfig
+from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.preprocess import ClangPreprocesser
@@ -56,11 +57,13 @@ def preprocess():
 
 @preprocess.command("run")
 @click.argument("config", type=click.Path(exists=True))
-def preprocess_run(config) -> None:
+@click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
+@click.option("--openmp-check", is_flag=True, help="Enable OpenMP support")
+def preprocess_run(config, parallel_workers, openmp_check) -> None:
     initialize()
 
     config_obj = AnalyzerConfig.load(config)
-    action = ClangPreprocesser()
+    action = ClangPreprocesser(parallel_workers, openmp_check)
     action.validate(config_obj)
     action.execute(config_obj)
 
@@ -73,6 +76,33 @@ def preprocess_summary(config) -> None:
     config_obj = AnalyzerConfig.load(config)
     action = ClangPreprocesser()
     action.print_summary(config_obj)
+
+
+@cli.group()
+def ir():
+    pass
+
+
+@ir.command("run")
+@click.argument("config", type=click.Path(exists=True))
+@click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
+def ir_compiler_run(config, parallel_workers) -> None:
+    initialize()
+
+    config_obj = AnalyzerConfig.load(config)
+    action = IRCompiler(parallel_workers)
+    action.validate(config_obj)
+    action.execute(config_obj)
+
+
+@ir.command("summary")
+@click.argument("config", type=click.Path(exists=True))
+def ir_compiler_run_summary(config) -> None:
+    initialize()
+
+    config_obj = AnalyzerConfig.load(config)
+    action = IRCompiler(1)
+    # action.print_summary(config_obj)
 
 
 def main() -> None:

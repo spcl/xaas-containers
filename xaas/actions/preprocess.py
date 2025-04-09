@@ -16,15 +16,20 @@ from xaas.actions.analyze import DivergenceReason
 from xaas.actions.analyze import SourceFileStatus
 from xaas.actions.docker import VolumeMount
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 class ClangPreprocesser(Action):
-    def __init__(self):
+    def __init__(self, parallel_workers: int, openmp_check: bool):
         super().__init__(
             name="clangpreproceser", description="Apply Clang preprocessing to detect differences."
         )
 
+        self.parallel_workers = parallel_workers
+        self.openmp_check = openmp_check
         self.DOCKER_IMAGE = "builder"
-        self.CLANG_PATH = "/usr/bin/clang++-16"
+        self.CLANG_PATH = "/usr/bin/clang++-19"
+        self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
     def print_summary(self, config: AnalyzerConfig) -> None:
         logging.info(f"Total files: {len(config.build_comparison.source_files)}")
@@ -99,16 +104,56 @@ class ClangPreprocesser(Action):
 
         baseline_project = config.build.build_results[0].directory
 
-        for src, status in tqdm.tqdm(config.build_comparison.source_files.items()):
+        futures = []
+        results = []
+
+        all_projects = list(config.build_comparison.source_files.items())
+
+        size = 0
+        for _, status in all_projects:
+            size += 1 + len(status.divergent_projects)
+
+        with tqdm.tqdm(total=size) as pbar:  # noqa: SIM117
+            with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
+                for src, status in tqdm.tqdm(all_projects):
+                    if len(status.divergent_projects) == 0:
+                        continue
+
+                    cmd = config.build_comparison.project_results[baseline_project].files[src]
+                    futures.append(
+                        executor.submit(
+                            self._preprocess_file, containers[baseline_project], src, cmd
+                        )
+                    )
+
+                    for name, _ in status.divergent_projects.items():
+                        cmd = config.build_comparison.project_results[name].files[src]
+
+                        futures.append(
+                            executor.submit(self._preprocess_file, containers[name], src, cmd)
+                        )
+
+                for future in futures:
+                    pbar.update(1)
+                    results.append(future.result())
+
+        result_iter = iter(results)
+        for src, status in all_projects:
             if len(status.divergent_projects) == 0:
                 logging.debug(f"Skipping {src}, no differences found")
+                continue
 
             logging.debug(f"Preprocess baseline {src}")
             cmd = config.build_comparison.project_results[baseline_project].files[src]
 
-            original_processed_file = self._preprocess_file(containers[baseline_project], src, cmd)
+            original_processed_file = next(result_iter)
             if not original_processed_file:
                 logging.error("Skip because of an error")
+
+                # drop results
+                for _ in range(len(status.divergent_projects)):
+                    next(result_iter)
+
                 continue
 
             success = []
@@ -117,16 +162,19 @@ class ClangPreprocesser(Action):
 
                 cmd = config.build_comparison.project_results[name].files[src]
 
-                processed_file = self._preprocess_file(containers[name], src, cmd)
+                processed_file = next(result_iter)
                 if processed_file:
-                    success.append((name, processed_file))
+                    success.append((name, *processed_file))
 
             self._compare_preprocessed_files(
                 src,
-                (baseline_project, original_processed_file),
+                (baseline_project, *original_processed_file),
                 success,
                 config.build_comparison.source_files[src],
             )
+
+            if self.openmp_check:
+                self._optimize_omp(src, config.build_comparison.source_files[src])
 
         for container in containers.values():
             container.stop(timeout=0)
@@ -138,7 +186,7 @@ class ClangPreprocesser(Action):
 
     def _preprocess_file(
         self, container: Container, source_file: str, command: CompileCommand
-    ) -> str | None:
+    ) -> tuple[str, bool] | None:
         preprocess_cmd = [self.CLANG_PATH, "-E"]
 
         preprocess_cmd.extend(command.includes)
@@ -159,8 +207,18 @@ class ClangPreprocesser(Action):
         if code != 0:
             logging.error(f"Error preprocessing {source_file}: {output}")
             return None
-        else:
-            return preprocessed_file
+
+        if not self.openmp_check:
+            return preprocessed_file, True
+
+        omp_tool_cmd = [self.OMP_TOOL_PATH, preprocessed_file]
+        cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
+        code, output = self.docker_runner.exec_run(container, cmd, "/build")
+        if code != 0:
+            logging.error(f"Error OMP processing {source_file}: {output}")
+            return None
+
+        return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
 
     def _hash_file(self, path: str) -> str:
         with open(path) as f:
@@ -172,20 +230,72 @@ class ClangPreprocesser(Action):
     def _compare_preprocessed_files(
         self,
         src: str,
-        original_processed_file: tuple[str, str],
-        processed_files: list[tuple[str, str]],
+        original_processed_file: tuple[str, str, bool],
+        processed_files: list[tuple[str, str, bool]],
         result: SourceFileStatus,
     ):
         logging.debug(f"Comparing preprocessed files for {src}")
 
-        original_path = os.path.join(*original_processed_file)
+        original_path = os.path.join(*original_processed_file[0:2])
         result.hash = self._hash_file(original_path)
+        result.has_omp = original_processed_file[2]
         os.remove(original_path)
 
         for processed_file in processed_files:
-            new_path = os.path.join(*processed_file)
+            new_path = os.path.join(*processed_file[0:2])
+
             result.divergent_projects[processed_file[0]].hash = self._hash_file(new_path)
+            result.divergent_projects[processed_file[0]].has_omp = processed_file[2]
             os.remove(new_path)
+
+    def _optimize_omp(
+        self,
+        src: str,
+        result: SourceFileStatus,
+    ):
+        to_delete = []
+        for name, divergent_project in result.divergent_projects.items():
+            # Optimization for OpenMP
+            # If hash is the same, and there is no difference in compiler and 'others'
+            # and the only difference in flags is `fopenmp`
+            # and there is no openmp
+            # then we can remove this divergence
+            if result.hash != divergent_project.hash:
+                continue
+
+            if divergent_project.has_omp:
+                continue
+
+            found = False
+            for reason in divergent_project.reasons:
+                if reason in [
+                    DivergenceReason.OPTIMIZATIONS,
+                    DivergenceReason.OTHERS,
+                    DivergenceReason.COMPILER,
+                ]:
+                    found = True
+                    break
+
+            if found:
+                continue
+
+            if DivergenceReason.FLAGS not in divergent_project.reasons:
+                continue
+
+            library_flags = divergent_project.reasons[DivergenceReason.FLAGS]
+            if (
+                len(library_flags["added"]) == 1
+                and len(library_flags["removed"]) == 0
+                and "fopenmp" in next(iter(library_flags["added"]))
+            ):
+                logging.info(
+                    f"For source file {src}, the project {name} differs only in OpenMP flag - but not OpenMP present!"
+                )
+                to_delete.append(name)
+
+        for del_key in to_delete:
+            print("Delete", src, del_key)
+            del result.divergent_projects[del_key]
 
     def validate(self, build_config: AnalyzerConfig) -> bool:
         work_dir = build_config.build.working_directory
