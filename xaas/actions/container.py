@@ -1,10 +1,11 @@
+import json
 import logging
 import os
 import tempfile
 from pathlib import Path
 
 from xaas.actions.action import Action
-from xaas.actions.analyze import Config as AnalyzerConfig
+from xaas.actions.ir import PreprocessingResult
 
 
 class DockerImageBuilder(Action):
@@ -15,7 +16,7 @@ class DockerImageBuilder(Action):
         )
         self.BASE_IMAGE = "spcleth/xaas:llvm-19"
 
-    def execute(self, config: AnalyzerConfig) -> bool:
+    def execute(self, config: PreprocessingResult) -> bool:
         project_name = config.build.project_name
         image_name = f"spcleth/xaas:{project_name}-ir"
 
@@ -28,8 +29,13 @@ class DockerImageBuilder(Action):
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
-
         logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
+
+        for build in config.build.build_results:
+            file_path = os.path.join(build.directory, "build.sh")
+            with open(file_path, "w") as f:
+                f.write(self._generate_bashscript(build.directory, config))
+            logging.info(f"[{self.name}] Created build script in {file_path}")
 
         logging.info(f"[{self.name}] Building Docker image: {image_name}, in {build_dir}")
 
@@ -39,7 +45,30 @@ class DockerImageBuilder(Action):
 
         return True
 
-    def _generate_dockerfile(self, config: AnalyzerConfig) -> str:
+    def _generate_bashscript(self, project_dir: str, config: PreprocessingResult) -> str:
+        lines = ["#!/bin/bash", ""]
+
+        project_file = os.path.join(project_dir, "compile_commands.json")
+        try:
+            with open(project_file) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            raise RuntimeError(f"Error reading {project_file}: {e}") from e
+
+        compile_dbs = {entry["file"]: entry for entry in data}
+
+        for src, result in config.source_files.items():
+            cmake_cmd = compile_dbs[src]["command"]
+
+            ir_file = result.projects[project_dir].ir_file.file
+            ir_cmd = cmake_cmd.replace(compile_dbs[src]["file"], ir_file)
+
+            lines.append(ir_cmd)
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _generate_dockerfile(self, config: PreprocessingResult) -> str:
         lines = [
             f"FROM {self.BASE_IMAGE}",
             "",
@@ -75,7 +104,7 @@ class DockerImageBuilder(Action):
 
         return "\n".join(lines)
 
-    def validate(self, config: AnalyzerConfig) -> bool:
+    def validate(self, config: PreprocessingResult) -> bool:
         work_dir = config.build.working_directory
         if not os.path.exists(work_dir):
             logging.error(f"[{self.name}] Working directory does not exist: {work_dir}")

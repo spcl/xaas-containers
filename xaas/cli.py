@@ -112,7 +112,7 @@ def ir_compiler_run_summary(config) -> None:
 def container(config) -> None:
     initialize()
 
-    config_obj = AnalyzerConfig.load(config)
+    config_obj = PreprocessingResult.load(config)
     action = DockerImageBuilder()
     action.validate(config_obj)
     action.execute(config_obj)
