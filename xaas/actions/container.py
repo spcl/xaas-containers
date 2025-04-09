@@ -60,6 +60,11 @@ class DockerImageBuilder(Action):
         lines.append("# Add source code")
         lines.append(f"COPY {config.build.source_directory} /source")
 
+        source_path = os.path.relpath(config.build.source_directory)
+        lines.append("")
+        lines.append("# Add IR files")
+        lines.append(f"COPY {os.path.join(config.build.working_directory, 'irs')} /irs")
+
         lines.append("")
         lines.append("# Set environment variables")
         lines.append(f"ENV PROJECT_NAME={config.build.project_name}")

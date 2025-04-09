@@ -25,6 +25,7 @@ class IRCompiler(Action):
         self.parallel_workers = parallel_workers
         self.DOCKER_IMAGE = "builder"
         self.CLANG_PATH = "/usr/bin/clang++-19"
+        self.IR_PATH = "irs"
 
     # def print_summary(self, config: AnalyzerConfig) -> None:
     #    logging.info(f"Total files processed: {len(config.build_comparison.source_files)}")
@@ -62,6 +63,9 @@ class IRCompiler(Action):
         containers = {}
         compile_dbs = {}
 
+        ir_dir = os.path.realpath(os.path.join(config.build.working_directory, self.IR_PATH))
+        os.makedirs(ir_dir, exist_ok=True)
+
         # Start containers for each build
         for build in config.build.build_results:
             logging.info(f"Setting up container for build {build}")
@@ -73,6 +77,12 @@ class IRCompiler(Action):
                 )
             )
             volumes.append(VolumeMount(source=os.path.realpath(build.directory), target="/build"))
+            volumes.append(
+                VolumeMount(
+                    source=ir_dir,
+                    target="/irs",
+                )
+            )
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
@@ -107,23 +117,35 @@ class IRCompiler(Action):
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 for src, status in config.build_comparison.source_files.items():
                     cmake_cmd = compile_dbs[baseline_project][src]["command"]
+
                     cmd = config.build_comparison.project_results[baseline_project].files[src]
                     futures.append(
                         executor.submit(
-                            self._compile_ir, containers[baseline_project], src, cmd, cmake_cmd
+                            self._compile_ir,
+                            containers[baseline_project],
+                            src,
+                            cmd,
+                            cmake_cmd,
+                            status.hash,
+                            config.build.working_directory,
                         )
                     )
 
-                    for project_name, _ in status.divergent_projects.items():
+                    for project_name, status in status.divergent_projects.items():
                         cmake_cmd = compile_dbs[project_name][src]["command"]
                         cmd = config.build_comparison.project_results[project_name].files[src]
                         futures.append(
                             executor.submit(
-                                self._compile_ir, containers[project_name], src, cmd, cmake_cmd
+                                self._compile_ir,
+                                containers[project_name],
+                                src,
+                                cmd,
+                                cmake_cmd,
+                                status.hash,
+                                config.build.working_directory,
                             )
                         )
 
-                # Collect results as they complete
                 for future in as_completed(futures):
                     pbar.update(1)
                     results.append(future.result())
@@ -134,17 +156,14 @@ class IRCompiler(Action):
             if baseline_result:
                 status.ir_file = baseline_result
 
-            # Get results for divergent projects
             for project_name, _ in status.divergent_projects.items():
                 divergent_result = next(result_iter)
                 if divergent_result:
                     status.divergent_projects[project_name].ir_file = divergent_result
 
-        # Stop containers
         for container in containers.values():
             container.stop(timeout=0)
 
-        # Save updated configuration
         config_path = os.path.join(config.build.working_directory, "ir_compilation.yml")
         config.save(config_path)
 
@@ -154,9 +173,21 @@ class IRCompiler(Action):
         return True
 
     def _compile_ir(
-        self, container: Container, source_file: str, command: CompileCommand, cmake_cmd: str
+        self,
+        container: Container,
+        source_file: str,
+        command: CompileCommand,
+        cmake_cmd: str,
+        hash: str,
+        working_directory: str,
     ) -> str | None:
-        ir_target = str(Path(command.target).with_suffix(".bc"))
+        # filename = os.path.basename(command.target)
+        ir_file = str(os.path.basename(Path(command.target).with_suffix(".bc")))
+
+        ir_target = os.path.join("/irs", command.target, hash, ir_file)
+        local_ir_target = os.path.join(working_directory, self.IR_PATH, command.target, hash)
+        print(local_ir_target)
+        os.makedirs(local_ir_target, exist_ok=True)
 
         ir_cmd = cmake_cmd.replace(command.target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
