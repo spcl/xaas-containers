@@ -39,10 +39,16 @@ class Runner:
 
             image = f"{self.docker_repository}:{image}"
 
+            envs = {
+                "USER_ID": str(self.uid),
+                "GROUP_ID": str(self.gid),
+            }
+
             container = self.client.containers.run(
                 image=image,
                 command=command,
-                user=f"{self.uid}:{self.gid}",
+                environment=envs,
+                # user=f"{self.uid}:{self.gid}",
                 volumes=volumes,
                 detach=detach,
                 remove=remove,

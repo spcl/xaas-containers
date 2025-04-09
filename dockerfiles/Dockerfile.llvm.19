@@ -1,0 +1,50 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    wget \
+    git \
+    curl \
+    gnupg \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    lsb-release \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-dev \
+    unzip \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+    && add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" \
+    && apt-get update \
+    && apt-get install -y \
+    clang-19 \
+    flang-19 \
+    libomp-19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV FC=/usr/bin/flang-new-19
+
+RUN update-alternatives --remove-all cc && update-alternatives --remove-all c++ \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100 \
+    && update-alternatives --install /usr/bin/cc clang /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/c++ clang++ /usr/bin/clang++-19 100
+
+WORKDIR /tmp
+
+## CMake - most recent.
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-linux-x86_64.sh \
+    && chmod +x cmake-3.28.1-linux-x86_64.sh \
+    && ./cmake-3.28.1-linux-x86_64.sh --skip-license --prefix=/usr/local \
+    && rm cmake-3.28.1-linux-x86_64.sh
+
+#WORKDIR /workspace
+
+

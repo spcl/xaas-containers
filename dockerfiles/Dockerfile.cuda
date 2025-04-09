@@ -1,0 +1,19 @@
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+## CUDA 12.2
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i cuda-keyring_1.1-1_all.deb \
+    && apt-get update \
+    && apt-get install -y cuda-toolkit-12-2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm cuda-keyring_1.1-1_all.deb
+
+FROM ubuntu:22.04
+
+COPY --from=builder /usr/local/cuda-12.2 /usr/local/cuda-12.2
