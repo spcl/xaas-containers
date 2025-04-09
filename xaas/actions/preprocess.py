@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict, namedtuple
+from itertools import islice
 from enum import Enum
 from hashlib import md5
 from pathlib import Path
@@ -173,106 +174,113 @@ class ClangPreprocesser(Action):
                     target,
                 )
 
-            futures = []
-            results = []
-
             all_projects = list(config.build_comparison.source_files.items())
 
             size = 0
             for _, status in all_projects:
                 size += 1 + len(status.divergent_projects)
 
+            # avoid problems caused by creating too many preprocessed files
+            BATCH_SIZE = 128
             logging.info(f"We have total {size} files to process")
             with tqdm.tqdm(total=size) as pbar:  # noqa: SIM117
                 with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                    for src, status in all_projects:
-                        # new_results.source_files[src] =
-                        #
-                        process_result = ProcessedResults(
-                            baseline_project=status.default_build,
-                            baseline_command=status.default_command,
-                        )
-                        process_result.projects[status.default_build] = FileStatus(
-                            ProjectDivergence()
-                        )
+                    iterator = iter(all_projects)
+                    while slice_projects := list(islice(iterator, BATCH_SIZE)):
+                        logging.info(f"Processing batch of {len(slice_projects)} files")
+                        futures = []
+                        results = []
 
-                        if len(status.divergent_projects) == 0:
-                            continue
-
-                        # FIXME: disable building of MPI files
-
-                        cmd = config.build_comparison.project_results[status.default_build].files[
-                            src
-                        ]
-                        futures.append(
-                            executor.submit(
-                                self._preprocess_file,
-                                containers[status.default_build].container,
-                                src,
-                                status.default_command,
-                                cmd,
-                                containers[status.default_build].working_dir,
+                        for src, status in slice_projects:
+                            # new_results.source_files[src] =
+                            #
+                            process_result = ProcessedResults(
+                                baseline_project=status.default_build,
+                                baseline_command=status.default_command,
                             )
-                        )
+                            process_result.projects[status.default_build] = FileStatus(
+                                ProjectDivergence()
+                            )
 
-                        for name, div_status in status.divergent_projects.items():
-                            cmd = config.build_comparison.project_results[name].files[src]
+                            if len(status.divergent_projects) == 0:
+                                continue
 
-                            process_result.projects[name] = FileStatus(div_status)
-                            # div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
+                            # FIXME: disable building of MPI files
+
+                            cmd = config.build_comparison.project_results[
+                                status.default_build
+                            ].files[src]
                             futures.append(
                                 executor.submit(
                                     self._preprocess_file,
-                                    containers[name].container,
+                                    containers[status.default_build].container,
                                     src,
                                     status.default_command,
                                     cmd,
-                                    containers[name].working_dir,
+                                    containers[status.default_build].working_dir,
                                 )
                             )
 
-                        new_results.source_files[src] = process_result
+                            for name, div_status in status.divergent_projects.items():
+                                cmd = config.build_comparison.project_results[name].files[src]
 
-                    for future in futures:
-                        pbar.update(1)
-                        res = future.result()
-                        results.append(res)
+                                process_result.projects[name] = FileStatus(div_status)
+                                # div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
+                                futures.append(
+                                    executor.submit(
+                                        self._preprocess_file,
+                                        containers[name].container,
+                                        src,
+                                        status.default_command,
+                                        cmd,
+                                        containers[name].working_dir,
+                                    )
+                                )
 
-            result_iter = iter(results)
-            for src, status in all_projects:
-                if len(status.divergent_projects) == 0:
-                    logging.debug(f"Skipping {src}, no differences found")
-                    continue
+                            new_results.source_files[src] = process_result
 
-                logging.debug(f"Preprocess baseline {src}")
-                cmd = config.build_comparison.project_results[status.default_build].files[src]
+                        for future in futures:
+                            pbar.update(1)
+                            res = future.result()
+                            results.append(res)
 
-                original_processed_file = next(result_iter)
-                if not original_processed_file:
-                    logging.error("Skip because of an error")
+                        result_iter = iter(results)
+                        for src, status in slice_projects:
+                            if len(status.divergent_projects) == 0:
+                                logging.debug(f"Skipping {src}, no differences found")
+                                continue
 
-                    # drop results
-                    for _ in range(len(status.divergent_projects)):
-                        next(result_iter)
+                            logging.debug(f"Preprocess baseline {src}")
+                            cmd = config.build_comparison.project_results[
+                                status.default_build
+                            ].files[src]
 
-                    continue
+                            original_processed_file = next(result_iter)
+                            if not original_processed_file:
+                                logging.error("Skip because of an error")
 
-                success = []
-                for name, _ in status.divergent_projects.items():
-                    logging.debug(f"Preprocess {src} for project {name}")
+                                # drop results
+                                for _ in range(len(status.divergent_projects)):
+                                    next(result_iter)
 
-                    cmd = config.build_comparison.project_results[name].files[src]
+                                continue
 
-                    processed_file = next(result_iter)
-                    if processed_file:
-                        success.append((name, *processed_file))
+                            success = []
+                            for name, _ in status.divergent_projects.items():
+                                logging.debug(f"Preprocess {src} for project {name}")
 
-                self._compare_preprocessed_files(
-                    src,
-                    (status.default_build, *original_processed_file),
-                    success,
-                    new_results.source_files[src],
-                )
+                                cmd = config.build_comparison.project_results[name].files[src]
+
+                                processed_file = next(result_iter)
+                                if processed_file:
+                                    success.append((name, *processed_file))
+
+                            self._compare_preprocessed_files(
+                                src,
+                                (status.default_build, *original_processed_file),
+                                success,
+                                new_results.source_files[src],
+                            )
 
                 # if self.openmp_check:
                 #    self._optimize_omp(src, config.build_comparison.source_files[src])
