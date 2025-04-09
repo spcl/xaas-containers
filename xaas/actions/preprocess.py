@@ -10,6 +10,7 @@ import tqdm
 from docker.models.containers import Container
 
 from xaas.actions.action import Action
+from xaas.actions.analyze import FileStatus
 from xaas.actions.analyze import CompileCommand
 from xaas.actions.analyze import Config as AnalyzerConfig
 from xaas.actions.analyze import DivergenceReason
@@ -126,7 +127,10 @@ class ClangPreprocesser(Action):
                     if len(status.divergent_projects) == 0:
                         continue
 
+                    # FIXME: disable building of MPI files
+
                     cmd = config.build_comparison.project_results[baseline_project].files[src]
+                    status.ir_file_status = FileStatus.INDIVIDUAL_IR
                     futures.append(
                         executor.submit(
                             self._preprocess_file,
@@ -137,9 +141,10 @@ class ClangPreprocesser(Action):
                         )
                     )
 
-                    for name, _ in status.divergent_projects.items():
+                    for name, div_status in status.divergent_projects.items():
                         cmd = config.build_comparison.project_results[name].files[src]
 
+                        div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
                         futures.append(
                             executor.submit(
                                 self._preprocess_file,
@@ -308,11 +313,12 @@ class ClangPreprocesser(Action):
                 logging.info(
                     f"For source file {src}, the project {name} differs only in OpenMP flag - but not OpenMP present!"
                 )
-                to_delete.append(name)
+                # to_delete.append(name)
+                divergent_project.ir_file_status = FileStatus.SHARED_IR
 
-        for del_key in to_delete:
-            print("Delete", src, del_key)
-            del result.divergent_projects[del_key]
+        # for del_key in to_delete:
+        #    print("Delete", src, del_key)
+        #    del result.divergent_projects[del_key]
 
     def validate(self, build_config: AnalyzerConfig) -> bool:
         work_dir = build_config.build.working_directory
