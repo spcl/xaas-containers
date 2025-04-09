@@ -322,6 +322,11 @@ class ClangPreprocesser(Action):
             logging.error(f"Error preprocessing {source_file}: {output}")
             return None
 
+        if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
+            command.flags
+        ):
+            return preprocessed_file, False
+
         if not self.openmp_check:
             return preprocessed_file, True
 
