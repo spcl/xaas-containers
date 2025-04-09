@@ -1,17 +1,23 @@
+import copy
 import logging
 import os
 import json
 from pathlib import Path
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 
 import tqdm
 from docker.models.containers import RUN_CREATE_KWARGS, Container
 
 from xaas.actions.action import Action
 from xaas.actions.analyze import CompileCommand
-from xaas.actions.preprocess import ProcessedResults, ProjectDivergence, DivergenceReason
-from xaas.actions.preprocess import PreprocessingResult, IRStatus, FileStatus
+from xaas.actions.preprocess import (
+    ProcessedResults,
+    ProjectDivergence,
+    DivergenceReason,
+    contains_openmp_flag,
+)
+from xaas.actions.preprocess import PreprocessingResult, IRFileStatus, FileStatus
 from xaas.actions.docker import VolumeMount
 
 
@@ -150,7 +156,9 @@ class IRCompiler(Action):
                             logging.info(
                                 f"[{self.name}] Skip building shared IR file {src} for {project_name}"
                             )
-                            futures.append(ir_path)
+                            fut = Future()
+                            fut.set_result(ir_path)
+                            futures.append(fut)
                             continue
 
                         cmake_cmd = compile_dbs[project_name][src]["command"]
@@ -169,25 +177,22 @@ class IRCompiler(Action):
 
                 for future in as_completed(futures):
                     pbar.update(1)
-                    if isinstance(future, str):
-                        results.append(future)
-                    else:
-                        results.append(future.result())
+                    results.append(future.result())
 
         result_iter = iter(results)
         for _, status in config.source_files.items():
             baseline_result = next(result_iter)
             if baseline_result:
-                status.projects[status.baseline_project].ir_file = baseline_result
+                status.projects[status.baseline_project].ir_file.file = baseline_result
 
             for project_name, _ in status.projects.items():
                 if project_name == status.baseline_project:
                     continue
                 divergent_result = next(result_iter)
                 if divergent_result:
-                    status.projects[project_name].ir_file = divergent_result
+                    status.projects[project_name].ir_file.file = divergent_result
                 else:
-                    status.projects[project_name].ir_file = divergent_result
+                    status.projects[project_name].ir_file.file = divergent_result
 
         for container in containers.values():
             container.stop(timeout=0)
@@ -201,17 +206,43 @@ class IRCompiler(Action):
         return True
 
     @staticmethod
-    def _divergence_equal(old: ProjectDivergence, new: ProjectDivergence) -> bool:
+    def _divergence_equal(old: tuple[ProjectDivergence, IRFileStatus], new: FileStatus) -> bool:
         for reason in [
             DivergenceReason.COMPILER,
             DivergenceReason.OPTIMIZATIONS,
-            DivergenceReason.FLAGS,
             DivergenceReason.OTHERS,
         ]:
-            if reason in old.reasons and reason in new.reasons:
-                if old.reasons[reason] != new.reasons[reason]:
+            if reason in old[0].reasons and reason in new.cmd_differences.reasons:
+                if old[0].reasons[reason] != new.cmd_differences.reasons[reason]:
                     return False
-            elif reason in old.reasons or reason in new.reasons:
+            elif reason in old[0].reasons or reason in new.cmd_differences.reasons:
+                return False
+
+        """
+            Apply the OpenMP optimization. Only possible if the only flag difference between builds.
+        """
+        reason = DivergenceReason.FLAGS
+        old_library_flags = (
+            old[0].reasons[DivergenceReason.FLAGS] if reason in old[0].reasons else {}
+        )
+        new_library_flags = (
+            new.cmd_differences.reasons[DivergenceReason.FLAGS]
+            if reason in new.cmd_differences.reasons
+            else {}
+        )
+        if old_library_flags != new_library_flags:
+            differences = set()
+            for flag in [old_library_flags, new_library_flags]:
+                if "added" in flag:
+                    for change in flag["added"]:
+                        differences.add(change)
+                if "removed" in flag:
+                    for change in flag["removed"]:
+                        differences.add(change)
+
+            if len(differences) == 1 and contains_openmp_flag(differences):
+                return not new.ir_file.has_omp and not old[1].has_omp
+            else:
                 return False
 
         return True
@@ -228,19 +259,24 @@ class IRCompiler(Action):
         current_divergence = status.cmd_differences
         if file_hash not in process_results.ir_files:
             path = self._generate_ir_path(status, baseline_command, 0)
-            process_results.ir_files[file_hash] = [(current_divergence, path)]
+
+            file = copy.copy(status.ir_file)
+            file.file = path
+            process_results.ir_files[file_hash] = [(current_divergence, file)]
             return (path, True)
         else:
             # This hash exists, check existing objects for it.
             existing_statuses = process_results.ir_files[file_hash]
             for existing_hash in existing_statuses:
-                existing_divergence = existing_hash[0]
+                # existing_divergence = existing_hash[0]
 
-                if self._divergence_equal(current_divergence, existing_divergence):
-                    return (existing_hash[1], False)
+                if self._divergence_equal(existing_hash, status):
+                    return (existing_hash[1].file, False)
 
             path = self._generate_ir_path(status, baseline_command, len(existing_statuses))
-            process_results.ir_files[file_hash].append((current_divergence, path))
+            file = copy.copy(status.ir_file)
+            file.file = path
+            process_results.ir_files[file_hash].append((current_divergence, file))
             return (path, True)
 
     def _generate_ir_path(

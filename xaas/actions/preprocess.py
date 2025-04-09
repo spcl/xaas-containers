@@ -28,13 +28,10 @@ from xaas.actions.docker import VolumeMount
 from concurrent.futures import ThreadPoolExecutor, as_completed, process
 
 
-class IRStatus(Enum):
-    SHARED_IR = "shared"
-    INDIVIDUAL_IR = "individual"
-    SOURCE = "source"
-
-    def __str__(self):
-        return self.name.lower()
+@dataclass
+class IRFileStatus(DataClassYAMLMixin):
+    has_omp: bool = False
+    file: str | None = None
 
 
 @dataclass
@@ -42,9 +39,7 @@ class FileStatus(DataClassYAMLMixin):
     # command: CompileCommand
     cmd_differences: ProjectDivergence
     hash: str | None = None
-    has_omp: bool = False
-    ir_file: str | None = None
-    ir_file_status: IRStatus = IRStatus.SOURCE
+    ir_file: IRFileStatus = field(default_factory=IRFileStatus)
 
 
 @dataclass
@@ -53,7 +48,7 @@ class ProcessedResults(DataClassYAMLMixin):
     baseline_command: CompileCommand
     # Mapping: hash -> list of [(config, path)]
     # We use to decide when two file with the same hash are compatible with each other
-    ir_files: dict[str, list[tuple[ProjectDivergence, str]]] = field(default_factory=dict)
+    ir_files: dict[str, list[tuple[ProjectDivergence, IRFileStatus]]] = field(default_factory=dict)
     projects: dict[str, FileStatus] = field(default_factory=dict)
 
 
@@ -227,7 +222,6 @@ class ClangPreprocesser(Action):
                                 cmd = config.build_comparison.project_results[name].files[src]
 
                                 process_result.projects[name] = FileStatus(div_status)
-                                # div_status.ir_file_status = FileStatus.INDIVIDUAL_IR
                                 futures.append(
                                     executor.submit(
                                         self._preprocess_file,
@@ -359,14 +353,14 @@ class ClangPreprocesser(Action):
 
         original_path = os.path.join(*original_processed_file[0:2])
         result.projects[original_processed_file[0]].hash = self._hash_file(original_path)
-        result.projects[original_processed_file[0]].has_omp = original_processed_file[2]
+        result.projects[original_processed_file[0]].ir_file.has_omp = original_processed_file[2]
         os.remove(original_path)
 
         for processed_file in processed_files:
             new_path = os.path.join(*processed_file[0:2])
 
             result.projects[processed_file[0]].hash = self._hash_file(new_path)
-            result.projects[processed_file[0]].has_omp = processed_file[2]
+            result.projects[processed_file[0]].ir_file.has_omp = processed_file[2]
             os.remove(new_path)
 
     def _optimize_omp(
@@ -384,7 +378,7 @@ class ClangPreprocesser(Action):
             if result.hash != divergent_project.hash:
                 continue
 
-            if divergent_project.has_omp:
+            if divergent_project.ir_file.has_omp:
                 continue
 
             found = False
