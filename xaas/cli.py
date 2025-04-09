@@ -7,10 +7,11 @@ import click
 from xaas.actions.analyze import BuildAnalyzer
 from xaas.actions.analyze import Config as AnalyzerConfig
 from xaas.actions.container import DockerImageBuilder
+
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
-from xaas.actions.preprocess import ClangPreprocesser
+from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import RunConfig
 from xaas.config import XaaSConfig
 
@@ -90,7 +91,7 @@ def ir():
 def ir_compiler_run(config, parallel_workers) -> None:
     initialize()
 
-    config_obj = AnalyzerConfig.load(config)
+    config_obj = PreprocessingResult.load(config)
     action = IRCompiler(parallel_workers)
     action.validate(config_obj)
     action.execute(config_obj)
@@ -101,7 +102,7 @@ def ir_compiler_run(config, parallel_workers) -> None:
 def ir_compiler_run_summary(config) -> None:
     initialize()
 
-    config_obj = AnalyzerConfig.load(config)
+    config_obj = PreprocessingResult.load(config)
     action = IRCompiler(1)
     # action.print_summary(config_obj)
 

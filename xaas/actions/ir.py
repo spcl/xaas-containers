@@ -6,13 +6,11 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import tqdm
-from docker.models.containers import Container
+from docker.models.containers import RUN_CREATE_KWARGS, Container
 
 from xaas.actions.action import Action
 from xaas.actions.analyze import CompileCommand
-from xaas.actions.analyze import Config as AnalyzerConfig
-from xaas.actions.analyze import DivergenceReason
-from xaas.actions.analyze import SourceFileStatus
+from xaas.actions.preprocess import PreprocessingResult, IRStatus, FileStatus
 from xaas.actions.docker import VolumeMount
 
 
@@ -57,8 +55,8 @@ class IRCompiler(Action):
     #    logging.info(f"\tDivergent files successfully compiled: {divergent_ir_successes}")
     #    logging.info(f"\tDivergent files failed to compile: {divergent_ir_failures}")
 
-    def execute(self, config: AnalyzerConfig) -> bool:
-        logging.info(f"[{self.name}] Generating LLVM IR for project {config.build.project_name}")
+    def execute(self, config: PreprocessingResult) -> bool:
+        logging.info("[{self.name}] Generating LLVM IR")
 
         containers = {}
         compile_dbs = {}
@@ -103,22 +101,26 @@ class IRCompiler(Action):
 
             compile_dbs[build.directory] = {entry["file"]: entry for entry in data}
 
-        baseline_project = config.build.build_results[0].directory
-
         total_tasks = 0
-        for src, status in config.build_comparison.source_files.items():
+        for src, status in config.source_files.items():
             total_tasks += 1
-            total_tasks += len(status.divergent_projects)
+            total_tasks += len(status.projects)
 
         futures = []
         results = []
 
+        file_builds = {}
         with tqdm.tqdm(total=total_tasks) as pbar:  # noqa: SIM117
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                for src, status in config.build_comparison.source_files.items():
+                for src, status in config.source_files.items():
+                    baseline_project = status.baseline_project
                     cmake_cmd = compile_dbs[baseline_project][src]["command"]
 
-                    cmd = config.build_comparison.project_results[baseline_project].files[src]
+                    logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
+
+                    file_builds[src] = set()
+
+                    cmd = status.baseline_command
                     futures.append(
                         executor.submit(
                             self._compile_ir,
@@ -126,14 +128,30 @@ class IRCompiler(Action):
                             src,
                             cmd,
                             cmake_cmd,
-                            status.hash,
+                            status.projects[status.baseline_project],
+                            "",
                             config.build.working_directory,
                         )
                     )
 
-                    for project_name, status in status.divergent_projects.items():
+                    for project_name, status in status.projects.items():
+                        if project_name == baseline_project:
+                            continue
+
                         cmake_cmd = compile_dbs[project_name][src]["command"]
-                        cmd = config.build_comparison.project_results[project_name].files[src]
+
+                        if (
+                            status.hash in file_builds
+                            and status.ir_file_status == FileStatus.SHARED_IR
+                        ):
+                            logging.info(
+                                f"[{self.name}] Skip building shared IR file {src} for {project_name}"
+                            )
+                            results.append(None)
+                            continue
+
+                        # file_builds.add(status.hash)
+
                         futures.append(
                             executor.submit(
                                 self._compile_ir,
@@ -141,7 +159,8 @@ class IRCompiler(Action):
                                 src,
                                 cmd,
                                 cmake_cmd,
-                                status.hash,
+                                status,
+                                project_name,
                                 config.build.working_directory,
                             )
                         )
@@ -151,15 +170,19 @@ class IRCompiler(Action):
                     results.append(future.result())
 
         result_iter = iter(results)
-        for _, status in config.build_comparison.source_files.items():
+        for src, status in config.source_files.items():
             baseline_result = next(result_iter)
             if baseline_result:
-                status.ir_file = baseline_result
+                status.projects[status.baseline_project].ir_file = baseline_result
 
-            for project_name, _ in status.divergent_projects.items():
+            for project_name, _ in status.projects.items():
+                if project_name == status.baseline_project:
+                    continue
                 divergent_result = next(result_iter)
                 if divergent_result:
-                    status.divergent_projects[project_name].ir_file = divergent_result
+                    status.projects[project_name].ir_file = divergent_result
+                else:
+                    status.projects[project_name].ir_file = divergent_result
 
         for container in containers.values():
             container.stop(timeout=0)
@@ -176,23 +199,35 @@ class IRCompiler(Action):
         self,
         container: Container,
         source_file: str,
-        command: CompileCommand,
+        baseline_command: CompileCommand,
         cmake_cmd: str,
-        hash: str,
+        status: FileStatus,
+        project_name: str,
         working_directory: str,
     ) -> str | None:
         # filename = os.path.basename(command.target)
-        ir_file = str(os.path.basename(Path(command.target).with_suffix(".bc")))
+        ir_file = str(os.path.basename(Path(baseline_command.target).with_suffix(".bc")))
 
-        ir_target = os.path.join("/irs", command.target, hash, ir_file)
-        local_ir_target = os.path.join(working_directory, self.IR_PATH, command.target, hash)
-        print(local_ir_target)
+        # location?
+        # for shared file, we put in /irs/file/common/hash/
+        # for individual, we put in /irs/file/<project-name>/hash/
+
+        assert status.hash is not None
+
+        if status.ir_file_status == IRStatus.SHARED_IR:
+            ir_path = os.path.join("common", status.hash)
+        else:
+            ir_path = os.path.join(project_name, status.hash)
+        ir_target = os.path.join("/irs", baseline_command.target, ir_path, ir_file)
+        local_ir_target = os.path.join(
+            working_directory, self.IR_PATH, baseline_command.target, ir_path
+        )
         os.makedirs(local_ir_target, exist_ok=True)
 
-        ir_cmd = cmake_cmd.replace(command.target, ir_target)
+        ir_cmd = cmake_cmd.replace(baseline_command.target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
 
-        logging.info(f"IR Compilation of {source_file}, {command.target} -> {ir_target}")
+        logging.info(f"IR Compilation of {source_file}, {baseline_command.target} -> {ir_target}")
         code, output = self.docker_runner.exec_run(container, ir_cmd.split(" "), "/build")
 
         if code != 0:
@@ -202,14 +237,10 @@ class IRCompiler(Action):
         logging.debug(f"Successfully generated IR for {source_file}")
         return ir_target
 
-    def validate(self, build_config: AnalyzerConfig) -> bool:
+    def validate(self, build_config: PreprocessingResult) -> bool:
         work_dir = build_config.build.working_directory
         if not os.path.exists(work_dir):
             logging.error(f"[{self.name}] Working directory does not exist: {work_dir}")
-            return False
-
-        if len(build_config.build.build_results) == 0:
-            logging.error(f"[{self.name}] No builds present!")
             return False
 
         return True
