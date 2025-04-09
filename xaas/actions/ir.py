@@ -131,6 +131,7 @@ class IRCompiler(Action):
                     )
                     assert is_new
 
+                    ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
                     futures.append(
                         executor.submit(
                             self._compile_ir,
@@ -139,6 +140,7 @@ class IRCompiler(Action):
                             status.baseline_command,
                             cmake_cmd,
                             ir_path,
+                            ir_target,
                             config.build.working_directory,
                         )
                     )
@@ -152,12 +154,13 @@ class IRCompiler(Action):
                             status.baseline_command,
                             status,
                         )
+                        ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
                         if not is_new:
                             logging.info(
                                 f"[{self.name}] Skip building shared IR file {src} for {project_name}"
                             )
                             fut = Future()
-                            fut.set_result(ir_path)
+                            fut.set_result(ir_target)
                             futures.append(fut)
                             continue
 
@@ -171,13 +174,14 @@ class IRCompiler(Action):
                                 status.baseline_command,
                                 cmake_cmd,
                                 ir_path,
+                                ir_target,
                                 config.build.working_directory,
                             )
                         )
 
-                for future in as_completed(futures):
-                    pbar.update(1)
+                for future in futures:
                     results.append(future.result())
+                    pbar.update(1)
 
         result_iter = iter(results)
         for _, status in config.source_files.items():
@@ -189,10 +193,7 @@ class IRCompiler(Action):
                 if project_name == status.baseline_project:
                     continue
                 divergent_result = next(result_iter)
-                if divergent_result:
-                    status.projects[project_name].ir_file.file = divergent_result
-                else:
-                    status.projects[project_name].ir_file.file = divergent_result
+                status.projects[project_name].ir_file.file = divergent_result
 
         for container in containers.values():
             container.stop(timeout=0)
@@ -260,7 +261,7 @@ class IRCompiler(Action):
         if file_hash not in process_results.ir_files:
             path = self._generate_ir_path(status, baseline_command, 0)
 
-            file = copy.copy(status.ir_file)
+            file = copy.deepcopy(status.ir_file)
             file.file = path
             process_results.ir_files[file_hash] = [(current_divergence, file)]
             return (path, True)
@@ -274,7 +275,7 @@ class IRCompiler(Action):
                     return (existing_hash[1].file, False)
 
             path = self._generate_ir_path(status, baseline_command, len(existing_statuses))
-            file = copy.copy(status.ir_file)
+            file = copy.deepcopy(status.ir_file)
             file.file = path
             process_results.ir_files[file_hash].append((current_divergence, file))
             return (path, True)
@@ -304,11 +305,9 @@ class IRCompiler(Action):
         baseline_command: CompileCommand,
         cmake_cmd: str,
         ir_path: str,
-        # ir_target: str,
+        ir_target: str,
         working_directory: str,
     ) -> str | None:
-        ir_target = os.path.join("/irs", baseline_command.target, ir_path)
-
         local_ir_target = os.path.join(
             working_directory, self.IR_PATH, baseline_command.target, ir_path
         )
