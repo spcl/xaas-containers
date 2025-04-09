@@ -116,9 +116,9 @@ class BuildGenerator(Action):
                 "-S",
                 "/source",
                 "-B",
-                "/build",
+                f"/builds/build_{build_dir}",
                 "&&",
-                "cd /build ",
+                f"cd /builds/build_{build_dir}",
             ]
             for additional_step in run_config.additional_steps:
                 configure_cmd.append(f"&& {additional_step}")
@@ -129,7 +129,9 @@ class BuildGenerator(Action):
             volumes.append(
                 VolumeMount(source=os.path.realpath(run_config.source_directory), target="/source")
             )
-            volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
+            volumes.append(
+                VolumeMount(source=os.path.realpath(new_dir), target=f"/builds/build_{build_dir}")
+            )
 
             res = BuildResult(directory=new_dir, features_boolean=active)
 

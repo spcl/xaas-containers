@@ -1,6 +1,6 @@
 import logging
 import os
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from hashlib import md5
 from mmap import ACCESS_READ
 from mmap import mmap
@@ -79,6 +79,7 @@ class ClangPreprocesser(Action):
     def execute(self, config: AnalyzerConfig) -> bool:
         logging.info(f"[{self.name}] Preprocessing project {config.build.project_name}")
 
+        Container = namedtuple("Container", ["container", "working_dir"])  # noqa: F821
         containers = {}
 
         for build in config.build.build_results:
@@ -90,16 +91,22 @@ class ClangPreprocesser(Action):
                     source=os.path.realpath(config.build.source_directory), target="/source"
                 )
             )
-            volumes.append(VolumeMount(source=os.path.realpath(build.directory), target="/build"))
 
-            containers[build.directory] = self.docker_runner.run(
-                command="/bin/bash",
-                image=self.DOCKER_IMAGE,
-                mounts=volumes,
-                remove=False,
-                detach=True,
-                tty=True,
-                working_dir="/build",
+            build_dir = os.path.basename(build.directory)
+            target = f"/builds/{build_dir}"
+            volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
+
+            containers[build.directory] = Container(
+                self.docker_runner.run(
+                    command="/bin/bash",
+                    image=self.DOCKER_IMAGE,
+                    mounts=volumes,
+                    remove=False,
+                    detach=True,
+                    tty=True,
+                    working_dir=target,
+                ),
+                target,
             )
 
         baseline_project = config.build.build_results[0].directory
@@ -122,7 +129,11 @@ class ClangPreprocesser(Action):
                     cmd = config.build_comparison.project_results[baseline_project].files[src]
                     futures.append(
                         executor.submit(
-                            self._preprocess_file, containers[baseline_project], src, cmd
+                            self._preprocess_file,
+                            containers[baseline_project].container,
+                            src,
+                            cmd,
+                            containers[baseline_project].working_dir,
                         )
                     )
 
@@ -130,7 +141,13 @@ class ClangPreprocesser(Action):
                         cmd = config.build_comparison.project_results[name].files[src]
 
                         futures.append(
-                            executor.submit(self._preprocess_file, containers[name], src, cmd)
+                            executor.submit(
+                                self._preprocess_file,
+                                containers[name].container,
+                                src,
+                                cmd,
+                                containers[name].working_dir,
+                            )
                         )
 
                 for future in futures:
@@ -177,7 +194,7 @@ class ClangPreprocesser(Action):
                 self._optimize_omp(src, config.build_comparison.source_files[src])
 
         for container in containers.values():
-            container.stop(timeout=0)
+            container.container.stop(timeout=0)
 
         config_path = os.path.join(config.build.working_directory, "preprocess.yml")
         config.save(config_path)
@@ -185,7 +202,7 @@ class ClangPreprocesser(Action):
         self.print_summary(config)
 
     def _preprocess_file(
-        self, container: Container, source_file: str, command: CompileCommand
+        self, container: Container, source_file: str, command: CompileCommand, working_dir: str
     ) -> tuple[str, bool] | None:
         preprocess_cmd = [self.CLANG_PATH, "-E"]
 
@@ -202,7 +219,7 @@ class ClangPreprocesser(Action):
         # We need to redirect this as a shell command
         cmd = ["/bin/bash", "-c", " ".join(preprocess_cmd)]
 
-        code, output = self.docker_runner.exec_run(container, cmd, "/build")
+        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
 
         if code != 0:
             logging.error(f"Error preprocessing {source_file}: {output}")
@@ -213,7 +230,7 @@ class ClangPreprocesser(Action):
 
         omp_tool_cmd = [self.OMP_TOOL_PATH, preprocessed_file]
         cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
-        code, output = self.docker_runner.exec_run(container, cmd, "/build")
+        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
         if code != 0:
             logging.error(f"Error OMP processing {source_file}: {output}")
             return None

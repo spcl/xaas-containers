@@ -20,6 +20,13 @@ class Runner:
         self.gid = os.getgid()
         self.docker_repository = docker_repository
 
+    def build(self, dockerfile: str, path: str, tag: str):
+        try:
+            self.client.images.build(dockerfile=dockerfile, path=path, tag=tag)
+        except docker.errors.APIError as e:
+            logging.error(f"Docker API error: {str(e)}")
+            raise
+
     def run(
         self,
         image: str,
