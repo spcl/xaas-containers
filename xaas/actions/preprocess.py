@@ -72,6 +72,15 @@ class PreprocessingResult(DataClassYAMLMixin):
             return PreprocessingResult.from_yaml(f)
 
 
+def contains_openmp_flag(flags) -> bool:
+    # gcc: -fopenmp
+    # clang: -fopenmp=libomp
+    # intel (icx/icpc): -qopenmp
+    # intel (icx/icpx): -fopenmp
+    # FIXME: add more for nvidia hpc of Cray if we need to
+    return any("-fopenmp" in flag or "-qopenmp" in flag for flag in flags)
+
+
 class ClangPreprocesser(Action):
     def __init__(self, parallel_workers: int, openmp_check: bool):
         super().__init__(
@@ -148,7 +157,7 @@ class ClangPreprocesser(Action):
                 )
 
                 build_dir = os.path.basename(build.directory)
-                target = f"/builds/{build_dir}"
+                target = "/build"
                 volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
 
                 containers[build.directory] = Container(
@@ -164,8 +173,6 @@ class ClangPreprocesser(Action):
                     target,
                 )
 
-            baseline_project = config.build.build_results[0].directory
-
             futures = []
             results = []
 
@@ -175,9 +182,10 @@ class ClangPreprocesser(Action):
             for _, status in all_projects:
                 size += 1 + len(status.divergent_projects)
 
+            logging.info(f"We have total {size} files to process")
             with tqdm.tqdm(total=size) as pbar:  # noqa: SIM117
                 with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                    for src, status in tqdm.tqdm(all_projects):
+                    for src, status in all_projects:
                         # new_results.source_files[src] =
                         #
                         process_result = ProcessedResults(
@@ -193,14 +201,17 @@ class ClangPreprocesser(Action):
 
                         # FIXME: disable building of MPI files
 
-                        cmd = config.build_comparison.project_results[baseline_project].files[src]
+                        cmd = config.build_comparison.project_results[status.default_build].files[
+                            src
+                        ]
                         futures.append(
                             executor.submit(
                                 self._preprocess_file,
-                                containers[baseline_project].container,
+                                containers[status.default_build].container,
                                 src,
+                                status.default_command,
                                 cmd,
-                                containers[baseline_project].working_dir,
+                                containers[status.default_build].working_dir,
                             )
                         )
 
@@ -214,6 +225,7 @@ class ClangPreprocesser(Action):
                                     self._preprocess_file,
                                     containers[name].container,
                                     src,
+                                    status.default_command,
                                     cmd,
                                     containers[name].working_dir,
                                 )
@@ -223,7 +235,8 @@ class ClangPreprocesser(Action):
 
                     for future in futures:
                         pbar.update(1)
-                        results.append(future.result())
+                        res = future.result()
+                        results.append(res)
 
             result_iter = iter(results)
             for src, status in all_projects:
@@ -232,7 +245,7 @@ class ClangPreprocesser(Action):
                     continue
 
                 logging.debug(f"Preprocess baseline {src}")
-                cmd = config.build_comparison.project_results[baseline_project].files[src]
+                cmd = config.build_comparison.project_results[status.default_build].files[src]
 
                 original_processed_file = next(result_iter)
                 if not original_processed_file:
@@ -256,7 +269,7 @@ class ClangPreprocesser(Action):
 
                 self._compare_preprocessed_files(
                     src,
-                    (baseline_project, *original_processed_file),
+                    (status.default_build, *original_processed_file),
                     success,
                     new_results.source_files[src],
                 )
@@ -273,7 +286,12 @@ class ClangPreprocesser(Action):
         self.print_summary(new_results)
 
     def _preprocess_file(
-        self, container: Container, source_file: str, command: CompileCommand, working_dir: str
+        self,
+        container: Container,
+        source_file: str,
+        baseline_command: CompileCommand,
+        command: CompileCommand,
+        working_dir: str,
     ) -> tuple[str, bool] | None:
         preprocess_cmd = [self.CLANG_PATH, "-E"]
 
