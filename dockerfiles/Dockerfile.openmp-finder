@@ -7,4 +7,4 @@ RUN apt-get update && apt-get install libclang-19-dev
 #RUN mkdir /tools && chown docker_user:docker_user /tools
 RUN mkdir /tools 
 ADD tools/ /tools/openmp-finder
-RUN cd /tools/openmp-finder && cmake . && make 
+RUN cd /tools/openmp-finder && cmake -DCMAKE_BUILD_TYPE=Release . && make 
