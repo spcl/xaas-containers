@@ -236,8 +236,8 @@ class ClangPreprocesser(Action):
                             new_results.source_files[src] = process_result
 
                         for future in futures:
-                            pbar.update(1)
                             res = future.result()
+                            pbar.update(1)
                             results.append(res)
 
                         result_iter = iter(results)
