@@ -11,6 +11,7 @@ from xaas.config import BuildResult
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import RunConfig
+from xaas.config import FeatureSelectionType
 
 
 @dataclass
@@ -84,8 +85,15 @@ class BuildGenerator(Action):
         return all_subsets
 
     @staticmethod
-    def generate_name(active: list[FeatureType]):
-        return "_".join([x.value for x in active])
+    def generate_name(active: list[FeatureType], flags: tuple[str | None]):
+        active_name = "_".join([x.value for x in active])
+        print(flags)
+        flags_name = "_".join(flags) if flags[0] is not None else None
+
+        if flags_name is not None:
+            return f"{active_name}_{flags_name}"
+        else:
+            return active_name
 
     def _build_cmake(self, run_config: RunConfig) -> bool:
         build_dir = os.path.join(run_config.working_directory, "build")
@@ -95,60 +103,82 @@ class BuildGenerator(Action):
 
         containers = []
 
-        for active, nonactive in subsets:
-            build_dir = self.generate_name(active)
-            new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
-            os.makedirs(new_dir, exist_ok=True)
+        options_select = []
+        options_select_flags = []
 
-            cmake_args = []
-            for arg in active:
-                cmake_args.append(f"-D{run_config.features_boolean[arg][0]}")
-            for arg in nonactive:
-                cmake_args.append(f"-D{run_config.features_boolean[arg][1]}")
-            for arg in run_config.additional_args:
-                cmake_args.append(f"-D{arg}")
+        # FIXME: extend to more options
+        if FeatureSelectionType.VECTORIZATION in run_config.features_select:
+            for name, option in run_config.features_select[
+                FeatureSelectionType.VECTORIZATION
+            ].items():
+                options_select.append((name,))
+                options_select_flags.append((option,))
 
-            logging.info(f"Executing build in {new_dir}, combination: {active}")
+        if len(options_select) == 0:
+            options_select.append((None,))
+            options_select_flags.append((None,))
 
-            configure_cmd = [
-                "bash",
-                "-c",
-                "'cmake",
-                "-DCMAKE_BUILD_TYPE=Release",
-                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-                *cmake_args,
-                "-S",
-                "/source",
-                "-B",
-                "/build",
-                "&&",
-                "cd /build",
-            ]
-            for additional_step in run_config.additional_steps:
-                configure_cmd.append(f"&& {additional_step}")
-            configure_cmd.append("'")
-            logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
+        for option, flag in zip(options_select, options_select_flags, strict=True):
+            for active, nonactive in subsets:
+                build_dir = self.generate_name(active, option)
 
-            volumes = []
-            volumes.append(
-                VolumeMount(source=os.path.realpath(run_config.source_directory), target="/source")
-            )
-            volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
+                new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
+                os.makedirs(new_dir, exist_ok=True)
 
-            res = BuildResult(directory=new_dir, features_boolean=active)
+                cmake_args = []
+                for arg in active:
+                    cmake_args.append(f"-D{run_config.features_boolean[arg][0]}")
+                for arg in nonactive:
+                    cmake_args.append(f"-D{run_config.features_boolean[arg][1]}")
+                for arg in run_config.additional_args:
+                    cmake_args.append(f"-D{arg}")
 
-            containers.append(
-                (
-                    self.docker_runner.run(
-                        image=self.DOCKER_IMAGE,
-                        command=" ".join(configure_cmd),
-                        mounts=volumes,
-                        remove=False,
-                        working_dir="/build",
-                    ),
-                    res,
+                for arg in flag:
+                    cmake_args.append(f"-D{arg}")
+
+                logging.info(f"Executing build in {new_dir}, combination: {active}")
+
+                configure_cmd = [
+                    "bash",
+                    "-c",
+                    "'cmake",
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                    *cmake_args,
+                    "-S",
+                    "/source",
+                    "-B",
+                    "/build",
+                    "&&",
+                    "cd /build",
+                ]
+                for additional_step in run_config.additional_steps:
+                    configure_cmd.append(f"&& {additional_step}")
+                configure_cmd.append("'")
+                logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
+
+                volumes = []
+                volumes.append(
+                    VolumeMount(
+                        source=os.path.realpath(run_config.source_directory), target="/source"
+                    )
                 )
-            )
+                volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
+
+                res = BuildResult(directory=new_dir, features_boolean=active)
+
+                containers.append(
+                    (
+                        self.docker_runner.run(
+                            image=self.DOCKER_IMAGE,
+                            command=" ".join(configure_cmd),
+                            mounts=volumes,
+                            remove=False,
+                            working_dir="/build",
+                        ),
+                        res,
+                    )
+                )
 
         all_successful = True
         logging.info(f"Waiting for {len(containers)} containers to finish")

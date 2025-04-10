@@ -21,6 +21,18 @@ from xaas.actions.preprocess import PreprocessingResult, IRFileStatus, FileStatu
 from xaas.actions.docker import VolumeMount
 
 
+def is_vectoriation_flag(flag: str) -> bool:
+    """
+    This implementation only supports Clang.
+    """
+    # gcc: -fopenmp
+    # clang: -fopenmp=libomp
+    # intel (icx/icpc): -qopenmp
+    # intel (icx/icpx): -fopenmp
+    # FIXME: add more for nvidia hpc of Cray if we need to
+    return any("-fopenmp" in flag or "-qopenmp" in flag for flag in flags)
+
+
 class IRCompiler(Action):
     def __init__(self, parallel_workers: int):
         super().__init__(
