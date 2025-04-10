@@ -111,6 +111,7 @@ class DockerImageBuilder(Action):
             [
                 "# Add build directories for IR analysis",
                 "WORKDIR /builds/",
+                "RUN apt-get update && apt-get install -y --no-install-recommends parallel && rm -rf /var/lib/apt/lists/*",
             ]
         )
 
