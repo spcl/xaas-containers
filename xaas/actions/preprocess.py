@@ -163,7 +163,7 @@ class ClangPreprocesser(Action):
                         command="/bin/bash",
                         image=self.DOCKER_IMAGE,
                         mounts=volumes,
-                        remove=False,
+                        remove=True,
                         detach=True,
                         tty=True,
                         working_dir=target,
