@@ -27,7 +27,7 @@ class DockerImageBuilder(Action):
         build_dir = os.path.join(config.build.working_directory, os.path.pardir)
         dockerfile_path = os.path.join(build_dir, "Dockerfile")
 
-        dockerfile_content = self._generate_dockerfile(config)
+        dockerfile_content = self._generate_dockerfile(build_dir, config)
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
@@ -87,7 +87,7 @@ class DockerImageBuilder(Action):
 
         return "\n".join(lines)
 
-    def _generate_dockerfile(self, config: PreprocessingResult) -> str:
+    def _generate_dockerfile(self, build_dir: str, config: PreprocessingResult) -> str:
         lines = []
 
         for dep in config.build.layers_deps:
@@ -116,22 +116,26 @@ class DockerImageBuilder(Action):
         )
 
         for i, build in enumerate(config.build.build_results):
-            build_path = build.directory
+            build_path = os.path.relpath(build.directory, build_dir)
             build_name = Path(build.directory).name
 
             lines.append(f"# Build {i + 1}: {build_name}")
             lines.append(f"COPY {build_path} /builds/{build_name}")
 
-        # TODO: make this conditional!
-        source_path = os.path.relpath(config.build.source_directory)
+        """
+            Necessary for the build to finish.
+        """
+        source_path = os.path.relpath(config.build.source_directory, build_dir)
         lines.append("")
         lines.append("# Add source code")
-        lines.append(f"COPY {config.build.source_directory} /source")
+        lines.append(f"COPY {source_path} /source")
 
         source_path = os.path.relpath(config.build.source_directory)
         lines.append("")
         lines.append("# Add IR files")
-        lines.append(f"COPY {os.path.join(config.build.working_directory, 'irs')} /irs")
+        lines.append(
+            f"COPY {os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir)} /irs"
+        )
 
         lines.append("")
         lines.append("# Set environment variables")

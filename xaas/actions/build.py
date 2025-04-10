@@ -131,7 +131,6 @@ class BuildGenerator(Action):
     @staticmethod
     def generate_name(active: list[FeatureType], flags: tuple[str | None]):
         active_name = "_".join([x.value for x in active])
-        print(flags)
         flags_name = "_".join(flags) if flags[0] is not None else None
 
         if flags_name is not None:
