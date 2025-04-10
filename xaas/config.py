@@ -20,10 +20,31 @@ class BuildSystem(Enum):
     AUTOTOOLS = "autotools"
 
 
+@dataclass
+class DockerLayer(DataClassYAMLMixin):
+    name: str
+    build_location: str
+    runtime_location: str
+
+
+@dataclass
+class DockerLayers(DataClassYAMLMixin):
+    layers: dict[FeatureType, DockerLayer]
+
+    @staticmethod
+    def load(config_path: str) -> DockerLayers:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return DockerLayers.from_yaml(f)
+
+
 class XaaSConfig:
     _instance: XaaSConfig | None = None
 
     DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
+    LAYERS_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "layers.yml")
 
     @property
     def initialized(self) -> bool:
@@ -40,7 +61,9 @@ class XaaSConfig:
         self._initialized: bool
         self.docker_repository: str
         self.ir_type: IRType
+        self.runner_image: str
         self.parallelism_level: int
+        self.layers: DockerLayers
 
     def initialize(self, config_path: str) -> None:
         if self._initialized:
@@ -54,12 +77,15 @@ class XaaSConfig:
 
         self.docker_repository = config_data["docker_repository"]
         self.parallelism_level = config_data["parallelism_level"]
+        self.runner_image = config_data["runner_image"]
 
         match config_data["ir_type"]:
             case IRType.LLVM_IR.value:
                 self.ir_type = IRType.LLVM_IR
             case _:
                 raise ValueError(f"Unsupported IR type: {config_data['ir_type']}")
+
+        self.layers = DockerLayers.load(XaaSConfig.LAYERS_CONFIGURATION)
 
         self._initialized = True
 

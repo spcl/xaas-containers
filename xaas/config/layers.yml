@@ -1,0 +1,5 @@
+layers:
+  MPI:
+    name: mpich
+    build_location: /opt/mpich
+    runtime_location: /opt/mpich

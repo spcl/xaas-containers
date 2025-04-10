@@ -1,3 +1,4 @@
 docker_repository: "spcleth/xaas"
+runner_image: "runner-19"
 ir_type: "llvm-ir"
 parallelism_level: 4
