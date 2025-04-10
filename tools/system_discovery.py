@@ -121,11 +121,13 @@ def get_accelerators():
                 shell=True,
                 text=True,
             )
+            nv_gpus = []
             gpus = smi_output.splitlines()
             for gpu in gpus:
                 data = [x.strip() for x in gpu.split(",")]
-                accelerators["nvidia"] = {"gpu": data[0], "compute_cap": data[1], "driver": data[2]}
+                nv_gpus.append({"gpu": data[0], "compute_cap": data[1], "driver": data[2]})
             nvidia_detected = bool(gpus)
+            accelerators["nvidia"] = nv_gpus
         except subprocess.CalledProcessError:
             pass
 
