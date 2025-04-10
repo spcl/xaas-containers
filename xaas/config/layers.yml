@@ -3,3 +3,10 @@ layers:
     name: mpich
     build_location: /opt/mpich
     runtime_location: /opt/mpich
+layers_deps:
+  fftw3:
+    name: deps-fftw3
+    build_location: /opt/fftw3
+    runtime_location: /opt/fftw3
+    envs:
+      PKG_CONFIG_PATH: /opt/fftw3/lib/pkgconfig

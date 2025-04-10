@@ -1,0 +1,15 @@
+FROM spcleth/xaas:llvm-19 as builder
+
+WORKDIR /tmp
+
+USER root
+
+RUN wget https://fftw.org/fftw-3.3.10.tar.gz \
+    && tar -xf fftw-3.3.10.tar.gz \
+    && cd fftw-3.3.10 \
+    && ./configure --enable-float --enable-threads --prefix=/opt/fftw3 \
+    && make -j8 && make install
+
+FROM ubuntu:22.04
+
+COPY --from=builder /opt/fftw3 /opt/fftw3

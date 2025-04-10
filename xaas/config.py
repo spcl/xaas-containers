@@ -30,6 +30,7 @@ class DockerLayer(DataClassYAMLMixin):
 @dataclass
 class DockerLayers(DataClassYAMLMixin):
     layers: dict[FeatureType, DockerLayer]
+    layers_deps: dict[str, DockerLayer]
 
     @staticmethod
     def load(config_path: str) -> DockerLayers:
@@ -117,6 +118,7 @@ class RunConfig(DataClassYAMLMixin):
     features_select: dict[FeatureSelectionType, dict[str, str]]
     additional_args: list[str]
     additional_steps: list[str]
+    layers_deps: list[str] = field(default_factory=list)
 
     @staticmethod
     def load(config_path: str) -> RunConfig:
