@@ -77,7 +77,7 @@ def preprocess_summary(config) -> None:
     initialize()
 
     config_obj = AnalyzerConfig.load(config)
-    action = ClangPreprocesser()
+    action = ClangPreprocesser(1, False)
     action.print_summary(config_obj)
 
 
