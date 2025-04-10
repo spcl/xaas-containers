@@ -89,11 +89,12 @@ def ir():
 @ir.command("run")
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
-def ir_compiler_run(config, parallel_workers) -> None:
+@click.option("--build-project", type=str, multiple=True)
+def ir_compiler_run(config, parallel_workers, build_project) -> None:
     initialize()
 
     config_obj = PreprocessingResult.load(config)
-    action = IRCompiler(parallel_workers)
+    action = IRCompiler(parallel_workers, build_project)
     action.validate(config_obj)
     action.execute(config_obj)
 

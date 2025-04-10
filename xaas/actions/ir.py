@@ -23,7 +23,7 @@ from xaas.actions.docker import VolumeMount
 
 def is_vectoriation_flag(flag: str) -> bool:
     """
-    This implementation only supports Clang.
+    This implementation only supports Clang.
     """
     # gcc: -fopenmp
     # clang: -fopenmp=libomp
@@ -34,13 +34,13 @@ def is_vectoriation_flag(flag: str) -> bool:
 
 
 class IRCompiler(Action):
-    def __init__(self, parallel_workers: int):
+    def __init__(self, parallel_workers: int, build_projects: list[str]):
         super().__init__(
             name="ircompiler", description="Generate LLVM IR bitcode for source files."
         )
 
+        self.build_projects = build_projects
         self.parallel_workers = parallel_workers
-        self.DOCKER_IMAGE = "builder"
         self.CLANG_PATH = "/usr/bin/clang++-19"
         self.IR_PATH = "irs"
 
@@ -83,8 +83,10 @@ class IRCompiler(Action):
         ir_dir = os.path.realpath(os.path.join(config.build.working_directory, self.IR_PATH))
         os.makedirs(ir_dir, exist_ok=True)
 
-        # Start containers for each build
         for build in config.build.build_results:
+            if os.path.basename(build.directory) not in self.build_projects:
+                continue
+
             logging.info(f"Setting up container for build {build}")
 
             volumes = []
@@ -103,7 +105,7 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=self.DOCKER_IMAGE,
+                image=config.build.docker_image,
                 mounts=volumes,
                 remove=False,
                 detach=True,
@@ -132,33 +134,35 @@ class IRCompiler(Action):
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
                 for src, status in config.source_files.items():
                     baseline_project = status.baseline_project
-                    cmake_cmd = compile_dbs[baseline_project][src]["command"]
 
-                    logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
-
-                    ir_path, is_new = self._find_id(
-                        status.projects[status.baseline_project],
-                        status.baseline_command,
-                        status,
-                    )
-                    assert is_new
-
-                    ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
-                    futures.append(
-                        executor.submit(
-                            self._compile_ir,
-                            containers[baseline_project],
-                            src,
+                    if os.path.basename(baseline_project) in self.build_projects:
+                        logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
+                        cmake_cmd = compile_dbs[baseline_project][src]["command"]
+                        ir_path, is_new = self._find_id(
+                            status.projects[status.baseline_project],
                             status.baseline_command,
-                            cmake_cmd,
-                            ir_path,
-                            ir_target,
-                            config.build.working_directory,
+                            status,
                         )
-                    )
+                        assert is_new
+
+                        ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
+                        futures.append(
+                            executor.submit(
+                                self._compile_ir,
+                                containers[baseline_project],
+                                src,
+                                status.baseline_command,
+                                cmake_cmd,
+                                ir_path,
+                                ir_target,
+                                config.build.working_directory,
+                            )
+                        )
 
                     for project_name, project_status in status.projects.items():
                         if project_name == baseline_project:
+                            continue
+                        if os.path.basename(project_name) not in self.build_projects:
                             continue
 
                         ir_path, is_new = self._find_id(
@@ -197,12 +201,15 @@ class IRCompiler(Action):
 
         result_iter = iter(results)
         for _, status in config.source_files.items():
-            baseline_result = next(result_iter)
-            if baseline_result:
-                status.projects[status.baseline_project].ir_file.file = baseline_result
+            if os.path.basename(status.baseline_project) in self.build_projects:
+                baseline_result = next(result_iter)
+                if baseline_result:
+                    status.projects[status.baseline_project].ir_file.file = baseline_result
 
             for project_name, _ in status.projects.items():
                 if project_name == status.baseline_project:
+                    continue
+                if os.path.basename(project_name) not in self.build_projects:
                     continue
                 divergent_result = next(result_iter)
                 status.projects[project_name].ir_file.file = divergent_result
