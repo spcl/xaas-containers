@@ -134,9 +134,36 @@ def get_accelerators():
     if shutil.which("rocminfo"):
         try:
             rocminfo_output = subprocess.check_output("rocminfo", shell=True, text=True)
+            amd_gpus = []
+
+
             if "Agent" in rocminfo_output:
-                accelerators.append("AMD GPU: Detected via rocminfo")
+
+                runtime_version_match = re.search(r'Runtime Version:\s+(.*)', rocminfo_output)
+                runtime_version = runtime_version_match.group(1).strip() if runtime_version_match else None
+
+                agent_sections = re.split(r'\*{7,}\s*\nAgent \d+\s*\n\*{7,}\s*\n', rocminfo_output)
+                for section in agent_sections[1:]:
+                    agent_info = {}
+                    device_type_match = re.search(r'Device Type:\s+(.*)', section)
+                    if device_type_match and device_type_match.group(1).strip() == 'GPU':
+                        name_match = re.search(r'Name:\s+(.*)', section)
+                        marketing_name_match = re.search(r'Marketing Name:\s+(.*)', section)
+
+                        if name_match:
+                            agent_info['name'] = name_match.group(1).strip()
+                        if marketing_name_match:
+                            agent_info['marketing_name'] = marketing_name_match.group(1).strip()
+
+                        if agent_info:
+                            agent_info['runtime_version'] = runtime_version
+                            amd_gpus.append(agent_info)
+                    else:
+                        name_match = re.search(r'Name:\s+(.*)', section).group(1).strip()
+                        print("Ignore non-GPU device", name_match)
+
                 amd_detected = True
+            accelerators["amd"] = amd_gpus
         except subprocess.CalledProcessError:
             pass
 
