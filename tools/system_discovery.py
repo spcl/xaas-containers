@@ -99,6 +99,7 @@ def get_accelerators():
     driver_versions = {}
     nvidia_detected = False
     amd_detected = False
+    intel_detected = False
 
     if shutil.which("lspci"):
         try:
@@ -136,34 +137,52 @@ def get_accelerators():
             rocminfo_output = subprocess.check_output("rocminfo", shell=True, text=True)
             amd_gpus = []
 
-
             if "Agent" in rocminfo_output:
+                runtime_version_match = re.search(r"Runtime Version:\s+(.*)", rocminfo_output)
+                runtime_version = (
+                    runtime_version_match.group(1).strip() if runtime_version_match else None
+                )
 
-                runtime_version_match = re.search(r'Runtime Version:\s+(.*)', rocminfo_output)
-                runtime_version = runtime_version_match.group(1).strip() if runtime_version_match else None
-
-                agent_sections = re.split(r'\*{7,}\s*\nAgent \d+\s*\n\*{7,}\s*\n', rocminfo_output)
+                agent_sections = re.split(r"\*{7,}\s*\nAgent \d+\s*\n\*{7,}\s*\n", rocminfo_output)
                 for section in agent_sections[1:]:
                     agent_info = {}
-                    device_type_match = re.search(r'Device Type:\s+(.*)', section)
-                    if device_type_match and device_type_match.group(1).strip() == 'GPU':
-                        name_match = re.search(r'Name:\s+(.*)', section)
-                        marketing_name_match = re.search(r'Marketing Name:\s+(.*)', section)
+                    device_type_match = re.search(r"Device Type:\s+(.*)", section)
+                    if device_type_match and device_type_match.group(1).strip() == "GPU":
+                        name_match = re.search(r"Name:\s+(.*)", section)
+                        marketing_name_match = re.search(r"Marketing Name:\s+(.*)", section)
 
                         if name_match:
-                            agent_info['name'] = name_match.group(1).strip()
+                            agent_info["name"] = name_match.group(1).strip()
                         if marketing_name_match:
-                            agent_info['marketing_name'] = marketing_name_match.group(1).strip()
+                            agent_info["marketing_name"] = marketing_name_match.group(1).strip()
 
                         if agent_info:
-                            agent_info['runtime_version'] = runtime_version
+                            agent_info["runtime_version"] = runtime_version
                             amd_gpus.append(agent_info)
                     else:
-                        name_match = re.search(r'Name:\s+(.*)', section).group(1).strip()
+                        name_match = re.search(r"Name:\s+(.*)", section).group(1).strip()
                         print("Ignore non-GPU device", name_match)
 
                 amd_detected = True
             accelerators["amd"] = amd_gpus
+        except subprocess.CalledProcessError:
+            pass
+
+    if shutil.which("xpu-smi"):
+        try:
+            xpu_output = subprocess.check_output("xpu-smi discovery -j", shell=True, text=True)
+            intel_gpus = []
+
+            data = json.loads(xpu_output)
+
+            if "device_list" in data:
+                for device in data["device_list"]:
+                    device_name = device.get("device_name", "Unknown")
+                    if device_name != "Unknown":
+                        intel_gpus.append({"name": device_name})
+
+            intel_detected = len(intel_gpus) > 0
+            accelerators["intel"] = intel_gpus
         except subprocess.CalledProcessError:
             pass
 
@@ -195,11 +214,12 @@ def get_accelerators():
         except Exception as e:
             print(f"Error retrieving AMD driver version: {e}")
 
-    driver_version_set = list(driver_versions.values())
+    if intel_detected:
+        driver_versions["Intel"] = "Unknown"
 
     return {
         "Accelerators": accelerators if accelerators else ["No accelerators detected"],
-        "Driver Versions": driver_version_set,
+        "Driver Versions": driver_versions,
     }
 
 
