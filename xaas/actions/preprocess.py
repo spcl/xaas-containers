@@ -199,6 +199,16 @@ class ClangPreprocesser(Action):
                             )
 
                             if len(status.divergent_projects) == 0:
+                                """
+                                    This file is identical across all builds - we can skip it.
+                                    But we need to note that all projects using it should include it.
+                                """
+                                for project in status.present_in_projects:
+                                    process_result.projects[project] = FileStatus(
+                                        ProjectDivergence()
+                                    )
+                                    process_result.projects[project].hash = "IDENTICAL"
+                                new_results.source_files[src] = process_result
                                 continue
 
                             # FIXME: disable building of MPI files
