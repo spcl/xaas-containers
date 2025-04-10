@@ -87,7 +87,6 @@ class ClangPreprocesser(Action):
 
         self.parallel_workers = parallel_workers
         self.openmp_check = openmp_check
-        self.DOCKER_IMAGE = "builder"
         self.CLANG_PATH = "/usr/bin/clang++-19"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
@@ -161,7 +160,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=self.DOCKER_IMAGE,
+                        image=config.build.docker_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,

@@ -10,6 +10,7 @@ from xaas.actions.docker import VolumeMount
 from xaas.config import BuildResult
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
+from xaas.config import XaaSConfig
 from xaas.config import RunConfig
 from xaas.config import FeatureSelectionType
 
@@ -17,6 +18,7 @@ from xaas.config import FeatureSelectionType
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
+    docker_image: str = "builder"
 
     @staticmethod
     def load(config_path: str) -> Config:
@@ -31,13 +33,55 @@ class BuildGenerator(Action):
     def __init__(self):
         super().__init__(name="build", description="Builds the project with specified features")
 
-        self.DOCKER_IMAGE = "builder"
+    def _generate_docker_image(self, layers_deps: list[str]) -> str:
+        lines = []
+
+        for dep in layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(f"FROM {XaaSConfig().docker_repository}:{dep_cfg.name} as {dep_cfg.name}")
+
+        lines.append(f"FROM {XaaSConfig().docker_repository}:builder")
+
+        for dep in layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(
+                f"COPY --from={dep_cfg.name} {dep_cfg.build_location} {dep_cfg.build_location}"
+            )
+
+        return "\n".join(lines)
 
     def execute(self, run_config: RunConfig) -> bool:
-        print(f"[{self.name}] Building project {run_config.project_name}")
+        logging.info(f"[{self.name}] Building project {run_config.project_name}")
+
+        config_obj = Config.from_instance(run_config)
+        if len(run_config.layers_deps) > 0:
+            logging.info(f"[{self.name}] Create custom builder image for {run_config.project_name}")
+
+            config_obj.docker_image = f"{config_obj.docker_image}-{run_config.project_name}"
+
+            build_dir = os.path.join(run_config.working_directory, "images")
+            os.makedirs(build_dir, exist_ok=True)
+            dockerfile_path = os.path.join(build_dir, "Dockerfile")
+
+            dockerfile_content = self._generate_docker_image(run_config.layers_deps)
+
+            with open(dockerfile_path, "w") as f:
+                f.write(dockerfile_content)
+            logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
+
+            logging.info(
+                f"[{self.name}] Building Docker image: {config_obj.docker_image}, in {build_dir}"
+            )
+
+            self.docker_runner.build(
+                dockerfile="Dockerfile",
+                path=build_dir,
+                tag=f"{XaaSConfig().docker_repository}:{config_obj.docker_image}",
+            )
+
+            logging.info(f"[{self.name}] Successfully built Docker image {config_obj.docker_image}")
 
         status: bool
-        config_obj = Config.from_instance(run_config)
         if run_config.build_system == BuildSystem.CMAKE:
             status = self._build_cmake(config_obj)
         else:
@@ -170,7 +214,7 @@ class BuildGenerator(Action):
                 containers.append(
                     (
                         self.docker_runner.run(
-                            image=self.DOCKER_IMAGE,
+                            image=run_config.docker_image,
                             command=" ".join(configure_cmd),
                             mounts=volumes,
                             remove=False,
