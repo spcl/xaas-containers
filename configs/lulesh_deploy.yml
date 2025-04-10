@@ -1,0 +1,6 @@
+ir_image: LULESH-ir
+working_directory: deployment
+features_select: {}
+features_boolean:
+  MPI: False
+  OPENMP: True

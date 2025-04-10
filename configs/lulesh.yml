@@ -2,6 +2,9 @@ working_directory: lulesh-builds
 source_directory: LULESH
 project_name: LULESH
 build_system: cmake
-features:
+features_select: {}
+features_boolean:
   MPI: [WITH_MPI=ON, WITH_MPI=OFF]
   OPENMP: [WITH_OPENMP=ON, WITH_OPENMP=OFF]
+additional_args: []
+additional_steps: []
