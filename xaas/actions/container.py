@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
 from xaas.actions.action import Action
 from xaas.actions.ir import PreprocessingResult
+from xaas.config import XaaSConfig
 
 
 class DockerImageBuilder(Action):
@@ -59,9 +61,26 @@ class DockerImageBuilder(Action):
 
         for src, result in config.source_files.items():
             cmake_cmd = compile_dbs[src]["command"]
+            cmake_directory = compile_dbs[src]["directory"]
+
+            # The paths can be relative:
+            # directory: /build/a/b
+            # target: a/b/x/c.cpp
+            # actual file in the command
+            actual_target = os.path.relpath(
+                os.path.join("/build", compile_dbs[src]["output"]), cmake_directory
+            )
+            # print(compile_dbs[src]["output"], actual_target)
 
             ir_file = result.projects[project_dir].ir_file.file
             ir_cmd = cmake_cmd.replace(compile_dbs[src]["file"], ir_file)
+            # make sure the path does not mess anything else
+            # this happens in gromacs - path to target is included in our path to ir file
+            # we can't do whole word boundary with \b because we have slashes, which
+            # are trated as not words
+            ir_cmd = re.sub(
+                rf"-o\s+\b{actual_target}\b", f"-o {compile_dbs[src]['output']}", ir_cmd
+            )
 
             lines.append(ir_cmd)
             lines.append("")
@@ -69,12 +88,31 @@ class DockerImageBuilder(Action):
         return "\n".join(lines)
 
     def _generate_dockerfile(self, config: PreprocessingResult) -> str:
-        lines = [
-            f"FROM {self.BASE_IMAGE}",
-            "",
-            "# Add build directories for IR analysis",
-            "WORKDIR /builds/",
-        ]
+        lines = []
+
+        for dep in config.build.layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(f"FROM {XaaSConfig().docker_repository}:{dep_cfg.name} as {dep_cfg.name}")
+
+        lines.extend(
+            [
+                f"FROM {self.BASE_IMAGE}",
+                "",
+            ]
+        )
+
+        for dep in config.build.layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(
+                f"COPY --from={dep_cfg.name} {dep_cfg.build_location} {dep_cfg.build_location}"
+            )
+
+        lines.extend(
+            [
+                "# Add build directories for IR analysis",
+                "WORKDIR /builds/",
+            ]
+        )
 
         for i, build in enumerate(config.build.build_results):
             build_path = build.directory
