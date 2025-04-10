@@ -297,11 +297,18 @@ class ClangPreprocesser(Action):
         command: CompileCommand,
         working_dir: str,
     ) -> tuple[str, bool] | None:
-        preprocess_cmd = [self.CLANG_PATH, "-E"]
+        """
+        Remove comments.
+        Otherwise, Clang will put a lot of additional comments for headers and flags.
+        Thus, enabling OpenMP will change the file even if does not affect anything.
+        """
+        preprocess_cmd = [self.CLANG_PATH, "-E", "-P"]
 
         preprocess_cmd.extend(command.includes)
         preprocess_cmd.extend(command.definitions)
 
+        # OpenMP adds its own preprocessing directive
+        preprocess_cmd.extend(command.flags)
         preprocess_cmd.append(source_file)
 
         preprocessed_file = str(Path(command.target).with_suffix(".i"))
