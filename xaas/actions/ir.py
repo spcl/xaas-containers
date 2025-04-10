@@ -138,6 +138,7 @@ class IRCompiler(Action):
                     if os.path.basename(baseline_project) in self.build_projects:
                         logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
                         cmake_cmd = compile_dbs[baseline_project][src]["command"]
+                        cmake_directory = compile_dbs[baseline_project][src]["directory"]
                         ir_path, is_new = self._find_id(
                             status.projects[status.baseline_project],
                             status.baseline_command,
@@ -153,6 +154,7 @@ class IRCompiler(Action):
                                 src,
                                 status.baseline_command,
                                 cmake_cmd,
+                                cmake_directory,
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
@@ -181,6 +183,7 @@ class IRCompiler(Action):
                             continue
 
                         cmake_cmd = compile_dbs[project_name][src]["command"]
+                        cmake_directory = compile_dbs[project_name][src]["directory"]
 
                         futures.append(
                             executor.submit(
@@ -189,6 +192,7 @@ class IRCompiler(Action):
                                 src,
                                 status.baseline_command,
                                 cmake_cmd,
+                                cmake_directory,
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
@@ -199,12 +203,16 @@ class IRCompiler(Action):
                     results.append(future.result())
                     pbar.update(1)
 
+        errors = 0
         result_iter = iter(results)
-        for _, status in config.source_files.items():
+        for src, status in config.source_files.items():
             if os.path.basename(status.baseline_project) in self.build_projects:
                 baseline_result = next(result_iter)
                 if baseline_result:
                     status.projects[status.baseline_project].ir_file.file = baseline_result
+                else:
+                    logging.error(f"Failed to build IR {src} for baseline project")
+                    errors += 1
 
             for project_name, _ in status.projects.items():
                 if project_name == status.baseline_project:
@@ -212,10 +220,17 @@ class IRCompiler(Action):
                 if os.path.basename(project_name) not in self.build_projects:
                     continue
                 divergent_result = next(result_iter)
-                status.projects[project_name].ir_file.file = divergent_result
+                if divergent_result:
+                    status.projects[project_name].ir_file.file = divergent_result
+                else:
+                    logging.error(f"Failed to build IR {src} for other project")
+                    errors += 1
 
-        for container in containers.values():
-            container.stop(timeout=0)
+        if errors > 0:
+            logging.error(f"Failed to build {errors} IR files")
+
+        # for container in containers.values():
+        #    container.stop(timeout=0)
 
         config_path = os.path.join(config.build.working_directory, "ir_compilation.yml")
         config.save(config_path)
@@ -323,6 +338,7 @@ class IRCompiler(Action):
         source_file: str,
         baseline_command: CompileCommand,
         cmake_cmd: str,
+        cmake_directory: str,
         ir_path: str,
         ir_target: str,
         working_directory: str,
@@ -332,11 +348,20 @@ class IRCompiler(Action):
         )
         os.makedirs(os.path.dirname(local_ir_target), exist_ok=True)
 
-        ir_cmd = cmake_cmd.replace(baseline_command.target, ir_target)
+        # The paths can be relative:
+        # directory: /build/a/b
+        # target: a/b/x/c.cpp
+        # actual file in the command
+        actual_target = os.path.relpath(
+            os.path.join("/build", baseline_command.target), cmake_directory
+        )
+
+        ir_cmd = cmake_cmd.replace(actual_target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
 
         logging.info(f"IR Compilation of {source_file}, {baseline_command.target} -> {ir_target}")
-        code, output = self.docker_runner.exec_run(container, ir_cmd.split(" "), "/build")
+        # if we just pass the raw comamnd
+        code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], "/build")
 
         if code != 0:
             logging.error(f"Error generating IR for {source_file}: {output}")
