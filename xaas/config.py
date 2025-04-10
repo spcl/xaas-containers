@@ -107,3 +107,27 @@ class RunConfig(DataClassYAMLMixin):
     @classmethod
     def from_instance(cls, instance):
         return cls(**asdict(instance))
+
+
+@dataclass
+class DeployConfig(DataClassYAMLMixin):
+    ir_image: str
+    working_directory: str
+    features_boolean: dict[FeatureType, bool]
+    features_select: dict[FeatureSelectionType, str]
+
+    @staticmethod
+    def load(config_path: str) -> DeployConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return DeployConfig.from_yaml(f)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @classmethod
+    def from_instance(cls, instance):
+        return cls(**asdict(instance))

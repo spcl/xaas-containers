@@ -11,8 +11,9 @@ from xaas.actions.container import DockerImageBuilder
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
+from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
-from xaas.config import RunConfig
+from xaas.config import DeployConfig, RunConfig
 from xaas.config import XaaSConfig
 
 
@@ -114,6 +115,17 @@ def container(config) -> None:
 
     config_obj = PreprocessingResult.load(config)
     action = DockerImageBuilder()
+    action.validate(config_obj)
+    action.execute(config_obj)
+
+
+@cli.command()
+@click.argument("config", type=click.Path(exists=True))
+def deploy(config) -> None:
+    initialize()
+
+    config_obj = DeployConfig.load(config)
+    action = Deployment()
     action.validate(config_obj)
     action.execute(config_obj)
 

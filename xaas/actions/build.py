@@ -83,6 +83,10 @@ class BuildGenerator(Action):
 
         return all_subsets
 
+    @staticmethod
+    def generate_name(active: list[FeatureType]):
+        return "_".join([x.value for x in active])
+
     def _build_cmake(self, run_config: RunConfig) -> bool:
         build_dir = os.path.join(run_config.working_directory, "build")
 
@@ -92,7 +96,7 @@ class BuildGenerator(Action):
         containers = []
 
         for active, nonactive in subsets:
-            build_dir = "_".join([x.value for x in active])
+            build_dir = self.generate_name(active)
             new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
             os.makedirs(new_dir, exist_ok=True)
 
