@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import os
 
 import click
 
@@ -47,7 +48,9 @@ def buildgen(config) -> None:
 def analyze(config) -> None:
     initialize()
 
-    config_obj = BuildConfig.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = BuildConfig.load(os.path.join(run_config.working_directory, "buildgen.yml"))
     action = BuildAnalyzer()
     action.validate(config_obj)
     action.execute(config_obj)
@@ -61,11 +64,17 @@ def preprocess():
 @preprocess.command("run")
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
-@click.option("--openmp-check", is_flag=True, default=True, help="Enable OpenMP support")
+@click.option(
+    "--no-openmp-check", "openmp_check", is_flag=True, default=True, help="Enable OpenMP support"
+)
 def preprocess_run(config, parallel_workers, openmp_check) -> None:
     initialize()
 
-    config_obj = AnalyzerConfig.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = AnalyzerConfig.load(
+        os.path.join(run_config.working_directory, "build_analyze.yml")
+    )
     action = ClangPreprocesser(parallel_workers, openmp_check)
     action.validate(config_obj)
     action.execute(config_obj)
@@ -76,7 +85,11 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
 def preprocess_summary(config) -> None:
     initialize()
 
-    config_obj = PreprocessingResult.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "preprocess.yml")
+    )
     action = ClangPreprocesser(1, False)
     action.print_summary(config_obj)
 
@@ -93,7 +106,11 @@ def ir():
 def ir_compiler_run(config, parallel_workers, build_project) -> None:
     initialize()
 
-    config_obj = PreprocessingResult.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "preprocess.yml")
+    )
     action = IRCompiler(parallel_workers, build_project)
     action.validate(config_obj)
     action.execute(config_obj)
@@ -104,7 +121,11 @@ def ir_compiler_run(config, parallel_workers, build_project) -> None:
 def ir_compiler_run_summary(config) -> None:
     initialize()
 
-    config_obj = PreprocessingResult.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "preprocess.yml")
+    )
     action = IRCompiler(1)
     # action.print_summary(config_obj)
 
@@ -114,7 +135,11 @@ def ir_compiler_run_summary(config) -> None:
 def container(config) -> None:
     initialize()
 
-    config_obj = PreprocessingResult.load(config)
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "ir_compilation.yml")
+    )
     action = DockerImageBuilder()
     action.validate(config_obj)
     action.execute(config_obj)
