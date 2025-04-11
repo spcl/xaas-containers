@@ -45,35 +45,94 @@ class IRCompiler(Action):
         self.CLANG_PATH = "/usr/bin/clang++-19"
         self.IR_PATH = "irs"
 
-    # def print_summary(self, config: AnalyzerConfig) -> None:
-    #    logging.info(f"Total files processed: {len(config.build_comparison.source_files)}")
+    def print_summary(self, config: PreprocessingResult) -> None:
+        if not config or not config.targets:
+            logging.warning("Configuration data is empty or has no targets.")
+            return
 
-    #    for build_name, build in config.build_comparison.project_results.items():
-    #        logging.info(f"Project {build_name}:")
-    #        logging.info(f"\tFiles {len(build.files)} files")
+        """
+            - All configurations, and for each one of them how many total targets are needed
+            - Number of IR files shared across all configurations
+            - Number of IR files in the baseline configuration
+            - Number of IR files used only by other configurations (not the baseline)
+        """
 
-    #    ir_successes = 0
-    #    ir_failures = 0
-    #    divergent_ir_successes = 0
-    #    divergent_ir_failures = 0
+        all_configurations: set[str] = set()
+        targets_per_config = defaultdict(int)
+        hashes_per_config = defaultdict(set)
+        new_hashes_per_config = defaultdict(set)
+        baseline_hashes: set[str] = set()
+        non_baseline_hashes: set[str] = set()
+        all_hashes: set[str] = set()
 
-    #    for src, status in config.build_comparison.source_files.items():
-    #        if hasattr(status, "ir_generated") and status.ir_generated:
-    #            ir_successes += 1
-    #        else:
-    #            ir_failures += 1
+        shared_by_everyone = set()
 
-    #        for _, project_status in status.divergent_projects.items():
-    #            if hasattr(project_status, "ir_generated") and project_status.ir_generated:
-    #                divergent_ir_successes += 1
-    #            else:
-    #                divergent_ir_failures += 1
+        for target_name, target_info in config.targets.items():
+            baseline_project_name = target_info.baseline_project
+            if not baseline_project_name:
+                logging.warning(f"Target '{target_name}' is missing a baseline_project.")
+                continue
 
-    #    logging.info(f"IR Generation Summary:")
-    #    logging.info(f"\tBase files successfully compiled: {ir_successes}")
-    #    logging.info(f"\tBase files failed to compile: {ir_failures}")
-    #    logging.info(f"\tDivergent files successfully compiled: {divergent_ir_successes}")
-    #    logging.info(f"\tDivergent files failed to compile: {divergent_ir_failures}")
+            if baseline_project_name in target_info.projects:
+                baseline_status = target_info.projects[baseline_project_name]
+                all_configurations.add(baseline_project_name)
+                # targets_per_config[baseline_project_name] += 1
+                assert baseline_status.hash
+                baseline_hashes.add(baseline_status.hash)
+                hashes_per_config[baseline_project_name].add(baseline_status.hash)
+                new_hashes_per_config[baseline_project_name].add(baseline_status.hash)
+                all_hashes.add(baseline_status.hash)
+            else:
+                logging.warning(
+                    f"Baseline project '{baseline_project_name}' not found in projects for target '{target_name}'."
+                )
+
+            for project_name, project_status in target_info.projects.items():
+                all_configurations.add(project_name)
+                hashes_per_config[project_name].add(project_status.hash)
+                targets_per_config[project_name] += 1
+
+                if project_name != baseline_project_name:
+                    assert project_status.hash
+                    non_baseline_hashes.add(project_status.hash)
+
+                    all_hashes.add(project_status.hash)
+                    if project_status.hash not in baseline_hashes:
+                        new_hashes_per_config[project_name].add(project_status.hash)
+
+        non_baseline_only_hashes = non_baseline_hashes - baseline_hashes
+
+        logging.info("IR Generation Summary")
+
+        logging.info(f"\tTotal unique IRs {len(all_hashes)}")
+
+        logging.info("\tConfigurations and Target Counts:")
+        if all_configurations:
+            sorted_configs = sorted(all_configurations)
+            for config_name in sorted_configs:
+                # Adjusting count: A target is counted for *each* config it's part of.
+                # The user asked "how many total targets are *needed*" for each config.
+                # Interpretation: How many target entries list this configuration?
+                logging.info(f"- {config_name}: {targets_per_config[config_name]} targets")
+        else:
+            logging.info("No configurations found.")
+
+        logging.info("\tUnique Hashes per Configuration:")
+        if hashes_per_config:
+            # Sort for consistent output
+            sorted_configs = sorted(hashes_per_config.keys())
+            for config_name in sorted_configs:
+                logging.info(
+                    f"- {config_name}: {len(new_hashes_per_config[config_name])} unique hashes"
+                )
+        else:
+            logging.info("No hash data found.")
+
+        logging.info(f"\tUnique Hashes in Baseline Configurations: {len(baseline_hashes)}")
+
+        logging.info(
+            f"\tUnique Hashes Used Only by Non-Baseline Configurations: {len(non_baseline_only_hashes)}"
+        )
 
     def execute(self, config: PreprocessingResult) -> bool:
         logging.info("[{self.name}] Generating LLVM IR")
