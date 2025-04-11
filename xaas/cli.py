@@ -61,7 +61,7 @@ def preprocess():
 @preprocess.command("run")
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
-@click.option("--openmp-check", is_flag=True, help="Enable OpenMP support")
+@click.option("--openmp-check", is_flag=True, default=True, help="Enable OpenMP support")
 def preprocess_run(config, parallel_workers, openmp_check) -> None:
     initialize()
 
@@ -76,7 +76,7 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
 def preprocess_summary(config) -> None:
     initialize()
 
-    config_obj = AnalyzerConfig.load(config)
+    config_obj = PreprocessingResult.load(config)
     action = ClangPreprocesser(1, False)
     action.print_summary(config_obj)
 
@@ -122,11 +122,12 @@ def container(config) -> None:
 
 @cli.command()
 @click.argument("config", type=click.Path(exists=True))
-def deploy(config) -> None:
+@click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
+def deploy(config, parallel_workers) -> None:
     initialize()
 
     config_obj = DeployConfig.load(config)
-    action = Deployment()
+    action = Deployment(parallel_workers)
     action.validate(config_obj)
     action.execute(config_obj)
 

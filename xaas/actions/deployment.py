@@ -20,6 +20,9 @@ class Deployment(Action):
     def execute(self, config: DeployConfig) -> bool:
         active = [x for x, val in config.features_boolean.items() if val]
         flags = [val for x, val in config.features_select.items()]
+
+        if len(flags) == 0:
+            flags.append(None)
         name = BuildGenerator.generate_name(active, flags)
 
         dockerfile_path = os.path.join(config.working_directory, name)

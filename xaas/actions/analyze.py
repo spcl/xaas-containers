@@ -28,7 +28,7 @@ class DivergenceReason(Enum):
 
 @dataclass
 class CompileCommand(DataClassYAMLMixin):
-    target: str
+    source: str
     build_dir: str
     compiler: str
     flags: set = field(default_factory=set)
@@ -40,12 +40,7 @@ class CompileCommand(DataClassYAMLMixin):
 
 @dataclass
 class ProjectDivergence(DataClassYAMLMixin):
-    # project_name: str
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
-    # hash: str | None = None
-    # has_omp: bool = False
-    # ir_file: str | None = None
-    # ir_file_status: FileStatus = FileStatus.SOURCE
 
 
 @dataclass
@@ -56,17 +51,13 @@ class SourceFileStatus(DataClassYAMLMixin):
     default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
-    # hash: str | None = None
-    # has_omp: bool = False
-    # ir_file: str | None = None
-    # ir_file_status: FileStatus = FileStatus.SOURCE
 
 
 @dataclass
 class ProjectResult(DataClassYAMLMixin):
     """Results from analyzing a single project build."""
 
-    files: dict[str, CompileCommand] = field(default_factory=dict)  # Source file -> compile command
+    files: dict[str, CompileCommand] = field(default_factory=dict)  # Target file -> compile command
 
 
 @dataclass
@@ -155,11 +146,11 @@ class BuildAnalyzer(Action):
         except (json.JSONDecodeError, FileNotFoundError) as e:
             raise RuntimeError(f"Error reading {project_file}: {e}") from e
 
-        files = {entry["file"]: entry for entry in data}
+        files = {entry["output"]: entry for entry in data}
 
         project_result = ProjectResult()
 
-        for file, specification in files.items():
+        for target, specification in files.items():
             cmd = self._parse_command(
                 specification["command"],
                 specification["file"],
@@ -168,7 +159,7 @@ class BuildAnalyzer(Action):
             )
             assert cmd
 
-            project_result.files[file] = cmd
+            project_result.files[target] = cmd
 
         return project_result
 
@@ -278,7 +269,7 @@ class BuildAnalyzer(Action):
         if not elems:
             return None
 
-        result = CompileCommand(target, build_dir, elems[0])
+        result = CompileCommand(source, build_dir, elems[0])
 
         i = 1
         while i < len(elems):

@@ -177,7 +177,8 @@ class BuildGenerator(Action):
                     cmake_args.append(f"-D{arg}")
 
                 for arg in flag:
-                    cmake_args.append(f"-D{arg}")
+                    if arg is not None:
+                        cmake_args.append(f"-D{arg}")
 
                 logging.info(f"Executing build in {new_dir}, combination: {active}")
 

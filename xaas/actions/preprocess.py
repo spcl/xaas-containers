@@ -55,7 +55,7 @@ class ProcessedResults(DataClassYAMLMixin):
 @dataclass
 class PreprocessingResult(DataClassYAMLMixin):
     build: BuildConfig = field(default_factory=BuildConfig)
-    source_files: dict[str, ProcessedResults] = field(default_factory=dict)
+    targets: dict[str, ProcessedResults] = field(default_factory=dict)
 
     def save(self, config_path: str) -> None:
         with open(config_path, "w") as f:
@@ -91,14 +91,14 @@ class ClangPreprocesser(Action):
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
     def print_summary(self, config: PreprocessingResult) -> None:
-        logging.info(f"Total files: {len(config.source_files)}")
+        logging.info(f"Total files: {len(config.targets)}")
 
         differences = defaultdict(set)
         different_files = set()
         difference_identical_hash = defaultdict(set)
         identical_hash_different_flags = set()
         identical_after_processing = set()
-        for src, status in config.source_files.items():
+        for target, status in config.targets.items():
             hash_val = status.projects[status.baseline_project].hash
 
             for project_name, project_status in status.projects.items():
@@ -112,15 +112,15 @@ class ClangPreprocesser(Action):
                     )
                     == 0
                 ):
-                    identical_after_processing.add(src)
+                    identical_after_processing.add(target)
                 elif hash_val == project_status.hash:
                     for key in project_status.cmd_differences.reasons:
-                        difference_identical_hash[key].add(src)
-                        identical_hash_different_flags.add(src)
+                        difference_identical_hash[key].add(target)
+                        identical_hash_different_flags.add(target)
                 else:
                     for key in project_status.cmd_differences.reasons:
-                        differences[key].add(src)
-                        different_files.add(src)
+                        differences[key].add(target)
+                        different_files.add(target)
 
         logging.info(f"Different files: {len(different_files)}")
         for key, value in differences.items():
@@ -187,9 +187,7 @@ class ClangPreprocesser(Action):
                         futures = []
                         results = []
 
-                        for src, status in slice_projects:
-                            # new_results.source_files[src] =
-                            #
+                        for target, status in slice_projects:
                             process_result = ProcessedResults(
                                 baseline_project=status.default_build,
                                 baseline_command=status.default_command,
@@ -208,19 +206,19 @@ class ClangPreprocesser(Action):
                                         ProjectDivergence()
                                     )
                                     process_result.projects[project].hash = "IDENTICAL"
-                                new_results.source_files[src] = process_result
+                                new_results.targets[target] = process_result
                                 continue
 
                             # FIXME: disable building of MPI files
 
                             cmd = config.build_comparison.project_results[
                                 status.default_build
-                            ].files[src]
+                            ].files[target]
                             futures.append(
                                 executor.submit(
                                     self._preprocess_file,
                                     containers[status.default_build].container,
-                                    src,
+                                    target,
                                     status.default_command,
                                     cmd,
                                     containers[status.default_build].working_dir,
@@ -228,21 +226,21 @@ class ClangPreprocesser(Action):
                             )
 
                             for name, div_status in status.divergent_projects.items():
-                                cmd = config.build_comparison.project_results[name].files[src]
+                                cmd = config.build_comparison.project_results[name].files[target]
 
                                 process_result.projects[name] = FileStatus(div_status)
                                 futures.append(
                                     executor.submit(
                                         self._preprocess_file,
                                         containers[name].container,
-                                        src,
+                                        target,
                                         status.default_command,
                                         cmd,
                                         containers[name].working_dir,
                                     )
                                 )
 
-                            new_results.source_files[src] = process_result
+                            new_results.targets[target] = process_result
 
                         for future in futures:
                             res = future.result()
@@ -250,15 +248,15 @@ class ClangPreprocesser(Action):
                             results.append(res)
 
                         result_iter = iter(results)
-                        for src, status in slice_projects:
+                        for target, status in slice_projects:
                             if len(status.divergent_projects) == 0:
-                                logging.debug(f"Skipping {src}, no differences found")
+                                logging.debug(f"Skipping {target}, no differences found")
                                 continue
 
-                            logging.debug(f"Preprocess baseline {src}")
+                            logging.debug(f"Preprocess baseline {target}")
                             cmd = config.build_comparison.project_results[
                                 status.default_build
-                            ].files[src]
+                            ].files[target]
 
                             original_processed_file = next(result_iter)
                             if not original_processed_file:
@@ -272,19 +270,19 @@ class ClangPreprocesser(Action):
 
                             success = []
                             for name, _ in status.divergent_projects.items():
-                                logging.debug(f"Preprocess {src} for project {name}")
+                                logging.debug(f"Preprocess {target} for project {name}")
 
-                                cmd = config.build_comparison.project_results[name].files[src]
+                                cmd = config.build_comparison.project_results[name].files[target]
 
                                 processed_file = next(result_iter)
                                 if processed_file:
                                     success.append((name, *processed_file))
 
                             self._compare_preprocessed_files(
-                                src,
+                                target,
                                 (status.default_build, *original_processed_file),
                                 success,
-                                new_results.source_files[src],
+                                new_results.targets[target],
                             )
 
                 # if self.openmp_check:
@@ -301,7 +299,7 @@ class ClangPreprocesser(Action):
     def _preprocess_file(
         self,
         container: Container,
-        source_file: str,
+        target: str,
         baseline_command: CompileCommand,
         command: CompileCommand,
         working_dir: str,
@@ -318,9 +316,9 @@ class ClangPreprocesser(Action):
 
         # OpenMP adds its own preprocessing directive
         preprocess_cmd.extend(command.flags)
-        preprocess_cmd.append(source_file)
+        preprocess_cmd.append(command.source)
 
-        preprocessed_file = str(Path(command.target).with_suffix(".i"))
+        preprocessed_file = str(Path(target).with_suffix(".i"))
 
         preprocess_cmd.extend([">", preprocessed_file])
 
@@ -331,7 +329,7 @@ class ClangPreprocesser(Action):
         code, output = self.docker_runner.exec_run(container, cmd, working_dir)
 
         if code != 0:
-            logging.error(f"Error preprocessing {source_file}: {output}")
+            logging.error(f"Error preprocessing {target}: {output}")
             return None
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
@@ -346,7 +344,7 @@ class ClangPreprocesser(Action):
         cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
         code, output = self.docker_runner.exec_run(container, cmd, working_dir)
         if code != 0:
-            logging.error(f"Error OMP processing {source_file}: {output}")
+            logging.error(f"Error OMP processing {target}: {output}")
             return None
 
         return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
@@ -360,12 +358,12 @@ class ClangPreprocesser(Action):
 
     def _compare_preprocessed_files(
         self,
-        src: str,
+        target: str,
         original_processed_file: tuple[str, str, bool],
         processed_files: list[tuple[str, str, bool]],
         result: ProcessedResults,
     ):
-        logging.debug(f"Comparing preprocessed files for {src}")
+        logging.debug(f"Comparing preprocessed files for {target}")
 
         original_path = os.path.join(*original_processed_file[0:2])
         result.projects[original_processed_file[0]].hash = self._hash_file(original_path)
@@ -379,55 +377,55 @@ class ClangPreprocesser(Action):
             result.projects[processed_file[0]].ir_file.has_omp = processed_file[2]
             os.remove(new_path)
 
-    def _optimize_omp(
-        self,
-        src: str,
-        result: SourceFileStatus,
-    ):
-        to_delete = []
-        for name, divergent_project in result.divergent_projects.items():
-            # Optimization for OpenMP
-            # If hash is the same, and there is no difference in compiler and 'others'
-            # and the only difference in flags is `fopenmp`
-            # and there is no openmp
-            # then we can remove this divergence
-            if result.hash != divergent_project.hash:
-                continue
+    # def _optimize_omp(
+    #    self,
+    #    src: str,
+    #    result: SourceFileStatus,
+    # ):
+    #    to_delete = []
+    #    for name, divergent_project in result.divergent_projects.items():
+    #        # Optimization for OpenMP
+    #        # If hash is the same, and there is no difference in compiler and 'others'
+    #        # and the only difference in flags is `fopenmp`
+    #        # and there is no openmp
+    #        # then we can remove this divergence
+    #        if result.hash != divergent_project.hash:
+    #            continue
 
-            if divergent_project.ir_file.has_omp:
-                continue
+    #        if divergent_project.ir_file.has_omp:
+    #            continue
 
-            found = False
-            for reason in divergent_project.reasons:
-                if reason in [
-                    DivergenceReason.OPTIMIZATIONS,
-                    DivergenceReason.OTHERS,
-                    DivergenceReason.COMPILER,
-                ]:
-                    found = True
-                    break
+    #        found = False
+    #        for reason in divergent_project.reasons:
+    #            if reason in [
+    #                DivergenceReason.OPTIMIZATIONS,
+    #                DivergenceReason.OTHERS,
+    #                DivergenceReason.COMPILER,
+    #            ]:
+    #                found = True
+    #                break
 
-            if found:
-                continue
+    #        if found:
+    #            continue
 
-            if DivergenceReason.FLAGS not in divergent_project.reasons:
-                continue
+    #        if DivergenceReason.FLAGS not in divergent_project.reasons:
+    #            continue
 
-            library_flags = divergent_project.reasons[DivergenceReason.FLAGS]
-            if (
-                len(library_flags["added"]) == 1
-                and len(library_flags["removed"]) == 0
-                and "fopenmp" in next(iter(library_flags["added"]))
-            ):
-                logging.info(
-                    f"For source file {src}, the project {name} differs only in OpenMP flag - but not OpenMP present!"
-                )
-                # to_delete.append(name)
-                # divergent_project.ir_file_status = FileStatus.SHARED_IR
+    #        library_flags = divergent_project.reasons[DivergenceReason.FLAGS]
+    #        if (
+    #            len(library_flags["added"]) == 1
+    #            and len(library_flags["removed"]) == 0
+    #            and "fopenmp" in next(iter(library_flags["added"]))
+    #        ):
+    #            logging.info(
+    #                f"For source file {src}, the project {name} differs only in OpenMP flag - but not OpenMP present!"
+    #            )
+    #            # to_delete.append(name)
+    #            # divergent_project.ir_file_status = FileStatus.SHARED_IR
 
-        # for del_key in to_delete:
-        #    print("Delete", src, del_key)
-        #    del result.divergent_projects[del_key]
+    #    # for del_key in to_delete:
+    #    #    print("Delete", src, del_key)
+    #    #    del result.divergent_projects[del_key]
 
     def validate(self, build_config: AnalyzerConfig) -> bool:
         work_dir = build_config.build.working_directory

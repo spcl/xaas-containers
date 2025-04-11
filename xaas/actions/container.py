@@ -57,29 +57,29 @@ class DockerImageBuilder(Action):
         except (json.JSONDecodeError, FileNotFoundError) as e:
             raise RuntimeError(f"Error reading {project_file}: {e}") from e
 
-        compile_dbs = {entry["file"]: entry for entry in data}
+        compile_dbs = {entry["output"]: entry for entry in data}
 
-        for src, result in config.source_files.items():
-            cmake_cmd = compile_dbs[src]["command"]
-            cmake_directory = compile_dbs[src]["directory"]
+        for target, result in config.targets.items():
+            cmake_cmd = compile_dbs[target]["command"]
+            cmake_directory = compile_dbs[target]["directory"]
 
             # The paths can be relative:
             # directory: /build/a/b
             # target: a/b/x/c.cpp
             # actual file in the command
             actual_target = os.path.relpath(
-                os.path.join("/build", compile_dbs[src]["output"]), cmake_directory
+                os.path.join("/build", compile_dbs[target]["output"]), cmake_directory
             )
             # print(compile_dbs[src]["output"], actual_target)
 
             ir_file = result.projects[project_dir].ir_file.file
-            ir_cmd = cmake_cmd.replace(compile_dbs[src]["file"], ir_file)
+            ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
             # make sure the path does not mess anything else
             # this happens in gromacs - path to target is included in our path to ir file
             # we can't do whole word boundary with \b because we have slashes, which
             # are trated as not words
             ir_cmd = re.sub(
-                rf"-o\s+\b{actual_target}\b", f"-o {compile_dbs[src]['output']}", ir_cmd
+                rf"-o\s+\b{actual_target}\b", f"-o {compile_dbs[target]['output']}", ir_cmd
             )
 
             lines.append(ir_cmd)
