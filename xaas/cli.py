@@ -124,10 +124,10 @@ def ir_compiler_run_summary(config) -> None:
     run_config = RunConfig.load(config)
 
     config_obj = PreprocessingResult.load(
-        os.path.join(run_config.working_directory, "preprocess.yml")
+        os.path.join(run_config.working_directory, "ir_compilation.yml")
     )
-    action = IRCompiler(1)
-    # action.print_summary(config_obj)
+    action = IRCompiler(1, [])
+    action.print_summary(config_obj)
 
 
 @cli.command()
