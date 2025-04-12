@@ -10,19 +10,20 @@ from xaas.config import DeployConfig, XaaSConfig
 
 
 class Deployment(Action):
-    def __init__(self):
+    def __init__(self, parallel_workers: int):
         super().__init__(
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
         )
+        self.parallel_workers = parallel_workers
 
     def execute(self, config: DeployConfig) -> bool:
-        # project_name = config.build.project_name
-
-        # logging.info(f"[{self.name}] Building Docker image {image_name} for project {project_name}")
-
         active = [x for x, val in config.features_boolean.items() if val]
-        name = BuildGenerator.generate_name(active)
+        flags = [val for x, val in config.features_select.items()]
+
+        if len(flags) == 0:
+            flags.append(None)
+        name = BuildGenerator.generate_name(active, flags)
 
         dockerfile_path = os.path.join(config.working_directory, name)
         os.makedirs(dockerfile_path, exist_ok=True)
@@ -72,7 +73,8 @@ class Deployment(Action):
                 "# Add build directories for IR analysis",
                 f"RUN ln -s /builds/build_{name} /build",
                 "WORKDIR /build/",
-                "RUN /bin/bash build.sh && make",
+                # "RUN /bin/bash build.sh && make",
+                f"RUN parallel -j {self.parallel_workers} < build.sh && make",
             ]
         )
 

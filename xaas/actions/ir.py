@@ -21,46 +21,118 @@ from xaas.actions.preprocess import PreprocessingResult, IRFileStatus, FileStatu
 from xaas.actions.docker import VolumeMount
 
 
+def is_vectoriation_flag(flag: str) -> bool:
+    """
+    This implementation only supports Clang.
+    """
+    # gcc: -fopenmp
+    # clang: -fopenmp=libomp
+    # intel (icx/icpc): -qopenmp
+    # intel (icx/icpx): -fopenmp
+    # FIXME: add more for nvidia hpc of Cray if we need to
+    return any("-fopenmp" in flag or "-qopenmp" in flag for flag in flags)
+
+
 class IRCompiler(Action):
-    def __init__(self, parallel_workers: int):
+    def __init__(self, parallel_workers: int, build_projects: list[str]):
         super().__init__(
             name="ircompiler", description="Generate LLVM IR bitcode for source files."
         )
 
+        self.build_projects = build_projects
+        self.conditional_build = len(self.build_projects) > 0
         self.parallel_workers = parallel_workers
-        self.DOCKER_IMAGE = "builder"
         self.CLANG_PATH = "/usr/bin/clang++-19"
         self.IR_PATH = "irs"
 
-    # def print_summary(self, config: AnalyzerConfig) -> None:
-    #    logging.info(f"Total files processed: {len(config.build_comparison.source_files)}")
+    def print_summary(self, config: PreprocessingResult) -> None:
+        if not config or not config.targets:
+            logging.warning("Configuration data is empty or has no targets.")
+            return
 
-    #    for build_name, build in config.build_comparison.project_results.items():
-    #        logging.info(f"Project {build_name}:")
-    #        logging.info(f"\tFiles {len(build.files)} files")
+        """
+            - All configurations, and for each one of them how many total targets are needed
+            - Number of IR files shared across all configurations
+            - Number of IR files in the baseline configuration
+            - Number of IR files used only by other configurations (not the baseline)
+        """
 
-    #    ir_successes = 0
-    #    ir_failures = 0
-    #    divergent_ir_successes = 0
-    #    divergent_ir_failures = 0
+        all_configurations: set[str] = set()
+        targets_per_config = defaultdict(int)
+        hashes_per_config = defaultdict(set)
+        new_hashes_per_config = defaultdict(set)
+        baseline_hashes: set[str] = set()
+        non_baseline_hashes: set[str] = set()
+        all_hashes: set[str] = set()
 
-    #    for src, status in config.build_comparison.source_files.items():
-    #        if hasattr(status, "ir_generated") and status.ir_generated:
-    #            ir_successes += 1
-    #        else:
-    #            ir_failures += 1
+        shared_by_everyone = set()
 
-    #        for _, project_status in status.divergent_projects.items():
-    #            if hasattr(project_status, "ir_generated") and project_status.ir_generated:
-    #                divergent_ir_successes += 1
-    #            else:
-    #                divergent_ir_failures += 1
+        for target_name, target_info in config.targets.items():
+            baseline_project_name = target_info.baseline_project
+            if not baseline_project_name:
+                logging.warning(f"Target '{target_name}' is missing a baseline_project.")
+                continue
 
-    #    logging.info(f"IR Generation Summary:")
-    #    logging.info(f"\tBase files successfully compiled: {ir_successes}")
-    #    logging.info(f"\tBase files failed to compile: {ir_failures}")
-    #    logging.info(f"\tDivergent files successfully compiled: {divergent_ir_successes}")
-    #    logging.info(f"\tDivergent files failed to compile: {divergent_ir_failures}")
+            if baseline_project_name in target_info.projects:
+                baseline_status = target_info.projects[baseline_project_name]
+                all_configurations.add(baseline_project_name)
+                # targets_per_config[baseline_project_name] += 1
+                assert baseline_status.hash
+                baseline_hashes.add(baseline_status.hash)
+                hashes_per_config[baseline_project_name].add(baseline_status.hash)
+                new_hashes_per_config[baseline_project_name].add(baseline_status.hash)
+                all_hashes.add(baseline_status.hash)
+            else:
+                logging.warning(
+                    f"Baseline project '{baseline_project_name}' not found in projects for target '{target_name}'."
+                )
+
+            for project_name, project_status in target_info.projects.items():
+                all_configurations.add(project_name)
+                hashes_per_config[project_name].add(project_status.hash)
+                targets_per_config[project_name] += 1
+
+                if project_name != baseline_project_name:
+                    assert project_status.hash
+                    non_baseline_hashes.add(project_status.hash)
+
+                    all_hashes.add(project_status.hash)
+                    if project_status.hash not in baseline_hashes:
+                        new_hashes_per_config[project_name].add(project_status.hash)
+
+        non_baseline_only_hashes = non_baseline_hashes - baseline_hashes
+
+        logging.info("IR Generation Summary")
+
+        logging.info(f"\tTotal unique IRs {len(all_hashes)}")
+
+        logging.info("\tConfigurations and Target Counts:")
+        if all_configurations:
+            sorted_configs = sorted(all_configurations)
+            for config_name in sorted_configs:
+                # Adjusting count: A target is counted for *each* config it's part of.
+                # The user asked "how many total targets are *needed*" for each config.
+                # Interpretation: How many target entries list this configuration?
+                logging.info(f"- {config_name}: {targets_per_config[config_name]} targets")
+        else:
+            logging.info("No configurations found.")
+
+        logging.info("\tUnique Hashes per Configuration:")
+        if hashes_per_config:
+            # Sort for consistent output
+            sorted_configs = sorted(hashes_per_config.keys())
+            for config_name in sorted_configs:
+                logging.info(
+                    f"- {config_name}: {len(new_hashes_per_config[config_name])} unique hashes"
+                )
+        else:
+            logging.info("No hash data found.")
+
+        logging.info(f"\tUnique Hashes in Baseline Configurations: {len(baseline_hashes)}")
+
+        logging.info(
+            f"\tUnique Hashes Used Only by Non-Baseline Configurations: {len(non_baseline_only_hashes)}"
+        )
 
     def execute(self, config: PreprocessingResult) -> bool:
         logging.info("[{self.name}] Generating LLVM IR")
@@ -71,8 +143,13 @@ class IRCompiler(Action):
         ir_dir = os.path.realpath(os.path.join(config.build.working_directory, self.IR_PATH))
         os.makedirs(ir_dir, exist_ok=True)
 
-        # Start containers for each build
         for build in config.build.build_results:
+            if (
+                self.conditional_build
+                and os.path.basename(build.directory) not in self.build_projects
+            ):
+                continue
+
             logging.info(f"Setting up container for build {build}")
 
             volumes = []
@@ -91,7 +168,7 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=self.DOCKER_IMAGE,
+                image=config.build.docker_image,
                 mounts=volumes,
                 remove=False,
                 detach=True,
@@ -106,10 +183,10 @@ class IRCompiler(Action):
             except (json.JSONDecodeError, FileNotFoundError) as e:
                 raise RuntimeError(f"Error reading {project_file}: {e}") from e
 
-            compile_dbs[build.directory] = {entry["file"]: entry for entry in data}
+            compile_dbs[build.directory] = {entry["output"]: entry for entry in data}
 
         total_tasks = 0
-        for src, status in config.source_files.items():
+        for _, status in config.targets.items():
             total_tasks += 1
             total_tasks += len(status.projects)
 
@@ -118,61 +195,73 @@ class IRCompiler(Action):
 
         with tqdm.tqdm(total=total_tasks) as pbar:  # noqa: SIM117
             with ThreadPoolExecutor(max_workers=self.parallel_workers) as executor:
-                for src, status in config.source_files.items():
+                for target, status in config.targets.items():
                     baseline_project = status.baseline_project
-                    cmake_cmd = compile_dbs[baseline_project][src]["command"]
 
-                    logging.info(f"[{self.name}] Build file {src} for {baseline_project}")
-
-                    ir_path, is_new = self._find_id(
-                        status.projects[status.baseline_project],
-                        status.baseline_command,
-                        status,
-                    )
-                    assert is_new
-
-                    ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
-                    futures.append(
-                        executor.submit(
-                            self._compile_ir,
-                            containers[baseline_project],
-                            src,
-                            status.baseline_command,
-                            cmake_cmd,
-                            ir_path,
-                            ir_target,
-                            config.build.working_directory,
+                    if (
+                        not self.conditional_build
+                        or os.path.basename(baseline_project) in self.build_projects
+                    ):
+                        logging.info(f"[{self.name}] Build file {target} for {baseline_project}")
+                        cmake_cmd = compile_dbs[baseline_project][target]["command"]
+                        cmake_directory = compile_dbs[baseline_project][target]["directory"]
+                        ir_path, is_new = self._find_id(
+                            target,
+                            status.projects[status.baseline_project],
+                            status,
                         )
-                    )
+                        assert is_new
+
+                        ir_target = os.path.join("/irs", target, ir_path)
+                        futures.append(
+                            executor.submit(
+                                self._compile_ir,
+                                containers[baseline_project],
+                                target,
+                                status.baseline_command,
+                                cmake_cmd,
+                                cmake_directory,
+                                ir_path,
+                                ir_target,
+                                config.build.working_directory,
+                            )
+                        )
 
                     for project_name, project_status in status.projects.items():
                         if project_name == baseline_project:
                             continue
+                        if (
+                            self.conditional_build
+                            and os.path.basename(project_name) not in self.build_projects
+                        ):
+                            continue
 
                         ir_path, is_new = self._find_id(
+                            target,
                             project_status,
-                            status.baseline_command,
                             status,
                         )
-                        ir_target = os.path.join("/irs", status.baseline_command.target, ir_path)
+                        ir_target = os.path.join("/irs", target, ir_path)
                         if not is_new:
                             logging.info(
-                                f"[{self.name}] Skip building shared IR file {src} for {project_name}"
+                                f"[{self.name}] Skip building shared IR file {target} for {project_name}"
                             )
                             fut = Future()
                             fut.set_result(ir_target)
                             futures.append(fut)
                             continue
 
-                        cmake_cmd = compile_dbs[project_name][src]["command"]
+                        cmake_cmd = compile_dbs[project_name][target]["command"]
+                        cmake_directory = compile_dbs[project_name][target]["directory"]
 
                         futures.append(
                             executor.submit(
                                 self._compile_ir,
                                 containers[project_name],
-                                src,
+                                target,
                                 status.baseline_command,
                                 cmake_cmd,
+                                cmake_directory,
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
@@ -183,17 +272,37 @@ class IRCompiler(Action):
                     results.append(future.result())
                     pbar.update(1)
 
+        errors = 0
         result_iter = iter(results)
-        for _, status in config.source_files.items():
-            baseline_result = next(result_iter)
-            if baseline_result:
-                status.projects[status.baseline_project].ir_file.file = baseline_result
+        for target, status in config.targets.items():
+            if (
+                not self.conditional_build
+                or os.path.basename(status.baseline_project) in self.build_projects
+            ):
+                baseline_result = next(result_iter)
+                if baseline_result:
+                    status.projects[status.baseline_project].ir_file.file = baseline_result
+                else:
+                    logging.error(f"Failed to build IR {target} for baseline project")
+                    errors += 1
 
             for project_name, _ in status.projects.items():
                 if project_name == status.baseline_project:
                     continue
+                if (
+                    self.conditional_build
+                    and os.path.basename(project_name) not in self.build_projects
+                ):
+                    continue
                 divergent_result = next(result_iter)
-                status.projects[project_name].ir_file.file = divergent_result
+                if divergent_result:
+                    status.projects[project_name].ir_file.file = divergent_result
+                else:
+                    logging.error(f"Failed to build IR {target} for other project")
+                    errors += 1
+
+        if errors > 0:
+            logging.error(f"Failed to build {errors} IR files")
 
         for container in containers.values():
             container.stop(timeout=0)
@@ -250,8 +359,8 @@ class IRCompiler(Action):
 
     def _find_id(
         self,
+        target: str,
         status: FileStatus,
-        baseline_command: CompileCommand,
         process_results: ProcessedResults,
     ) -> tuple[str, bool]:
         file_hash = status.hash
@@ -259,7 +368,7 @@ class IRCompiler(Action):
 
         current_divergence = status.cmd_differences
         if file_hash not in process_results.ir_files:
-            path = self._generate_ir_path(status, baseline_command, 0)
+            path = self._generate_ir_path(status, target, 0)
 
             file = copy.deepcopy(status.ir_file)
             file.file = path
@@ -274,7 +383,7 @@ class IRCompiler(Action):
                 if self._divergence_equal(existing_hash, status):
                     return (existing_hash[1].file, False)
 
-            path = self._generate_ir_path(status, baseline_command, len(existing_statuses))
+            path = self._generate_ir_path(status, target, len(existing_statuses))
             file = copy.deepcopy(status.ir_file)
             file.file = path
             process_results.ir_files[file_hash].append((current_divergence, file))
@@ -283,7 +392,7 @@ class IRCompiler(Action):
     def _generate_ir_path(
         self,
         status: FileStatus,
-        baseline_command: CompileCommand,
+        target: str,
         id: int,
     ) -> str:
         # location?
@@ -291,7 +400,7 @@ class IRCompiler(Action):
         # what if the file is still different because of flags?
         # for every other, we put in /irs/<cmake-target>/hash/<id>
 
-        ir_file = str(os.path.basename(Path(baseline_command.target).with_suffix(".bc")))
+        ir_file = str(os.path.basename(Path(target).with_suffix(".bc")))
 
         assert status.hash is not None
         ir_path = os.path.join(status.hash, str(id), ir_file)
@@ -301,29 +410,35 @@ class IRCompiler(Action):
     def _compile_ir(
         self,
         container: Container,
-        source_file: str,
+        target: str,
         baseline_command: CompileCommand,
         cmake_cmd: str,
+        cmake_directory: str,
         ir_path: str,
         ir_target: str,
         working_directory: str,
     ) -> str | None:
-        local_ir_target = os.path.join(
-            working_directory, self.IR_PATH, baseline_command.target, ir_path
-        )
+        local_ir_target = os.path.join(working_directory, self.IR_PATH, target, ir_path)
         os.makedirs(os.path.dirname(local_ir_target), exist_ok=True)
 
-        ir_cmd = cmake_cmd.replace(baseline_command.target, ir_target)
+        # The paths can be relative:
+        # directory: /build/a/b
+        # target: a/b/x/c.cpp
+        # actual file in the command
+        actual_target = os.path.relpath(os.path.join("/build", target), cmake_directory)
+
+        ir_cmd = cmake_cmd.replace(actual_target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
 
-        logging.info(f"IR Compilation of {source_file}, {baseline_command.target} -> {ir_target}")
-        code, output = self.docker_runner.exec_run(container, ir_cmd.split(" "), "/build")
+        logging.info(f"IR Compilation of {baseline_command.source}, {target} -> {ir_target}")
+        # if we just pass the raw comamnd
+        code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], "/build")
 
         if code != 0:
-            logging.error(f"Error generating IR for {source_file}: {output}")
+            logging.error(f"Error generating IR for {baseline_command.source}: {output}")
             return None
 
-        logging.debug(f"Successfully generated IR for {source_file}")
+        logging.debug(f"Successfully generated IR for {baseline_command.source}")
         return ir_target
 
     def validate(self, build_config: PreprocessingResult) -> bool:

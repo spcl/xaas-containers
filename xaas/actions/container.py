@@ -1,11 +1,13 @@
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
 from xaas.actions.action import Action
 from xaas.actions.ir import PreprocessingResult
+from xaas.config import XaaSConfig
 
 
 class DockerImageBuilder(Action):
@@ -25,7 +27,7 @@ class DockerImageBuilder(Action):
         build_dir = os.path.join(config.build.working_directory, os.path.pardir)
         dockerfile_path = os.path.join(build_dir, "Dockerfile")
 
-        dockerfile_content = self._generate_dockerfile(config)
+        dockerfile_content = self._generate_dockerfile(build_dir, config)
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
@@ -55,44 +57,85 @@ class DockerImageBuilder(Action):
         except (json.JSONDecodeError, FileNotFoundError) as e:
             raise RuntimeError(f"Error reading {project_file}: {e}") from e
 
-        compile_dbs = {entry["file"]: entry for entry in data}
+        compile_dbs = {entry["output"]: entry for entry in data}
 
-        for src, result in config.source_files.items():
-            cmake_cmd = compile_dbs[src]["command"]
+        for target, result in config.targets.items():
+            cmake_cmd = compile_dbs[target]["command"]
+            cmake_directory = compile_dbs[target]["directory"]
+
+            # The paths can be relative:
+            # directory: /build/a/b
+            # target: a/b/x/c.cpp
+            # actual file in the command
+            actual_target = os.path.relpath(
+                os.path.join("/build", compile_dbs[target]["output"]), cmake_directory
+            )
+            # print(compile_dbs[src]["output"], actual_target)
 
             ir_file = result.projects[project_dir].ir_file.file
-            ir_cmd = cmake_cmd.replace(compile_dbs[src]["file"], ir_file)
+            ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
+            # make sure the path does not mess anything else
+            # this happens in gromacs - path to target is included in our path to ir file
+            # we can't do whole word boundary with \b because we have slashes, which
+            # are trated as not words
+            ir_cmd = re.sub(
+                rf"-o\s+\b{actual_target}\b", f"-o {compile_dbs[target]['output']}", ir_cmd
+            )
 
             lines.append(ir_cmd)
             lines.append("")
 
         return "\n".join(lines)
 
-    def _generate_dockerfile(self, config: PreprocessingResult) -> str:
-        lines = [
-            f"FROM {self.BASE_IMAGE}",
-            "",
-            "# Add build directories for IR analysis",
-            "WORKDIR /builds/",
-        ]
+    def _generate_dockerfile(self, build_dir: str, config: PreprocessingResult) -> str:
+        lines = []
+
+        for dep in config.build.layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(f"FROM {XaaSConfig().docker_repository}:{dep_cfg.name} as {dep_cfg.name}")
+
+        lines.extend(
+            [
+                f"FROM {self.BASE_IMAGE}",
+                "",
+            ]
+        )
+
+        for dep in config.build.layers_deps:
+            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            lines.append(
+                f"COPY --from={dep_cfg.name} {dep_cfg.build_location} {dep_cfg.build_location}"
+            )
+
+        lines.extend(
+            [
+                "# Add build directories for IR analysis",
+                "WORKDIR /builds/",
+                "RUN apt-get update && apt-get install -y --no-install-recommends parallel && rm -rf /var/lib/apt/lists/*",
+            ]
+        )
 
         for i, build in enumerate(config.build.build_results):
-            build_path = build.directory
+            build_path = os.path.relpath(build.directory, build_dir)
             build_name = Path(build.directory).name
 
             lines.append(f"# Build {i + 1}: {build_name}")
             lines.append(f"COPY {build_path} /builds/{build_name}")
 
-        # TODO: make this conditional!
-        source_path = os.path.relpath(config.build.source_directory)
+        """
+            Necessary for the build to finish.
+        """
+        source_path = os.path.relpath(config.build.source_directory, build_dir)
         lines.append("")
         lines.append("# Add source code")
-        lines.append(f"COPY {config.build.source_directory} /source")
+        lines.append(f"COPY {source_path} /source")
 
         source_path = os.path.relpath(config.build.source_directory)
         lines.append("")
         lines.append("# Add IR files")
-        lines.append(f"COPY {os.path.join(config.build.working_directory, 'irs')} /irs")
+        lines.append(
+            f"COPY {os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir)} /irs"
+        )
 
         lines.append("")
         lines.append("# Set environment variables")

@@ -1,0 +1,7 @@
+ir_image: gromacs-ir
+working_directory: deployment
+features_select:
+  VECTORIZATION: SSE4.1
+features_boolean:
+  MPI: False
+  OPENMP: True
