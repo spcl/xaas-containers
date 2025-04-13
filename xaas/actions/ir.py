@@ -213,6 +213,7 @@ class IRCompiler(Action):
                         assert is_new
 
                         ir_target = os.path.join("/irs", target, ir_path)
+                        # FIXME: merge with loop below
                         futures.append(
                             executor.submit(
                                 self._compile_ir,
@@ -224,6 +225,7 @@ class IRCompiler(Action):
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
+                                status.projects[baseline_project].cpu_tuning,
                             )
                         )
 
@@ -265,6 +267,7 @@ class IRCompiler(Action):
                                 ir_path,
                                 ir_target,
                                 config.build.working_directory,
+                                project_status.cpu_tuning,
                             )
                         )
 
@@ -319,6 +322,7 @@ class IRCompiler(Action):
     def _divergence_equal(old: tuple[ProjectDivergence, IRFileStatus], new: FileStatus) -> bool:
         for reason in [
             DivergenceReason.COMPILER,
+            DivergenceReason.CPU_TUNING,
             DivergenceReason.OPTIMIZATIONS,
             DivergenceReason.OTHERS,
         ]:
@@ -417,6 +421,7 @@ class IRCompiler(Action):
         ir_path: str,
         ir_target: str,
         working_directory: str,
+        cpu_tuning: set[str],
     ) -> str | None:
         local_ir_target = os.path.join(working_directory, self.IR_PATH, target, ir_path)
         os.makedirs(os.path.dirname(local_ir_target), exist_ok=True)
@@ -429,6 +434,11 @@ class IRCompiler(Action):
 
         ir_cmd = cmake_cmd.replace(actual_target, ir_target)
         ir_cmd = f"{ir_cmd} -emit-llvm"
+
+        if len(cpu_tuning) > 0:
+            ir_cmd += " -mllvm -disable-llvm-optzns"
+            for flag in cpu_tuning:
+                ir_cmd = ir_cmd.replace(flag, "")
 
         logging.info(f"IR Compilation of {baseline_command.source}, {target} -> {ir_target}")
         # if we just pass the raw comamnd
