@@ -1,0 +1,23 @@
+FROM spcleth/xaas:llvm-19
+
+ARG LLVM_VERSION=19.1.7
+
+RUN wget https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz && \
+    tar xf llvm-project-${LLVM_VERSION}.src.tar.xz && \
+    mv llvm-project-${LLVM_VERSION}.src llvm-src
+
+WORKDIR /tmp/llvm-build
+
+RUN cmake \
+    -DLLVM_ENABLE_PROJECTS="llvm" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/opt/llvm \
+    -DBUILD_SHARED_LIBS=ON \
+    ../llvm-src/llvm
+
+RUN make -j16 && make install
+
+
+#ENV PATH="/opt/llvm/bin:${PATH}"
+#ENV LD_LIBRARY_PATH="/opt/llvm/lib:${LD_LIBRARY_PATH}"
+
