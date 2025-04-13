@@ -217,9 +217,9 @@ class CPUTuning(Action):
         preprocess_cmd.extend(command.definitions)
         preprocess_cmd.extend(command.flags)
         preprocess_cmd.append(command.source)
-        preprocess_cmd.append(*command.others)
+        preprocess_cmd.extend(command.others)
 
-        preprocess_cmd.append(*flags)
+        preprocess_cmd.extend(flags)
 
         ir_file = str(Path(target).with_suffix(".ll"))
 
@@ -246,7 +246,6 @@ class CPUTuning(Action):
         cmd = ["/bin/bash", "-c", " ".join(get_features_cmd)]
         code, output = self.docker_runner.exec_run(container, cmd, working_dir)
 
-        print(output)
         if code != 0:
             raise RuntimeError(f"Error extracting features! {target}: {output}")
 
