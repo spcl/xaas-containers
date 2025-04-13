@@ -40,6 +40,7 @@ class FileStatus(DataClassYAMLMixin):
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
+    cpu_tuning: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -199,8 +200,12 @@ class ClangPreprocesser(Action):
                                 baseline_command=status.default_command,
                             )
                             process_result.projects[status.default_build] = FileStatus(
-                                ProjectDivergence()
+                                ProjectDivergence(),
                             )
+                            if status.default_build in status.cpu_tuning:
+                                process_result.projects[
+                                    status.default_build
+                                ].cpu_tuning = status.cpu_tuning[status.default_build]
 
                             if len(status.divergent_projects) == 0:
                                 """
@@ -212,10 +217,14 @@ class ClangPreprocesser(Action):
                                         ProjectDivergence()
                                     )
                                     process_result.projects[project].hash = "IDENTICAL"
+
+                                    if status.default_build in status.cpu_tuning:
+                                        process_result.projects[
+                                            project
+                                        ].cpu_tuning = status.cpu_tuning[project]
+
                                 new_results.targets[target] = process_result
                                 continue
-
-                            # FIXME: disable building of MPI files
 
                             cmd = config.build_comparison.project_results[
                                 status.default_build
@@ -235,6 +244,10 @@ class ClangPreprocesser(Action):
                                 cmd = config.build_comparison.project_results[name].files[target]
 
                                 process_result.projects[name] = FileStatus(div_status)
+                                if status.default_build in status.cpu_tuning:
+                                    process_result.projects[name].cpu_tuning = status.cpu_tuning[
+                                        name
+                                    ]
                                 futures.append(
                                     executor.submit(
                                         self._preprocess_file,
