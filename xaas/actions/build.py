@@ -14,11 +14,22 @@ from xaas.config import XaaSConfig
 from xaas.config import RunConfig
 from xaas.config import FeatureSelectionType
 
+from mashumaro.mixins.yaml import DataClassYAMLMixin
+
+
+@dataclass
+class CPUTuningFeatures(DataClassYAMLMixin):
+    target_cpu: str | None = ""
+    target_features: str | None = ""
+    tune_cpu: str | None = ""
+
 
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
     docker_image: str = "builder"
+    docker_image_dev: str = "builder-dev"
+    target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
     @staticmethod
     def load(config_path: str) -> Config:
@@ -149,11 +160,9 @@ class BuildGenerator(Action):
         options_select = []
         options_select_flags = []
 
-        # FIXME: extend to more options
-        if FeatureSelectionType.VECTORIZATION in run_config.features_select:
-            for name, option in run_config.features_select[
-                FeatureSelectionType.VECTORIZATION
-            ].items():
+        for key, selection in run_config.features_select.items():
+            for name, option in selection.items():
+                print(name, option)
                 options_select.append((name,))
                 options_select_flags.append((option,))
 
