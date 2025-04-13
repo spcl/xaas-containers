@@ -115,7 +115,7 @@ class RunConfig(DataClassYAMLMixin):
     build_system: BuildSystem
     source_directory: str
     features_boolean: dict[FeatureType, tuple[str, str]]
-    features_select: dict[FeatureSelectionType, dict[str, str]]
+    features_select: dict[FeatureSelectionType | str, dict[str, str]]
     additional_args: list[str]
     additional_steps: list[str]
     layers_deps: list[str] = field(default_factory=list)
@@ -142,7 +142,7 @@ class DeployConfig(DataClassYAMLMixin):
     ir_image: str
     working_directory: str
     features_boolean: dict[FeatureType, bool]
-    features_select: dict[FeatureSelectionType, str]
+    features_select: dict[FeatureSelectionType | str, str]
 
     @staticmethod
     def load(config_path: str) -> DeployConfig:
