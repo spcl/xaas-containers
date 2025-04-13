@@ -98,8 +98,13 @@ class ClangPreprocesser(Action):
         difference_identical_hash = defaultdict(set)
         identical_hash_different_flags = set()
         identical_after_processing = set()
+
+        appears_only_once = set()
         for target, status in config.targets.items():
             hash_val = status.projects[status.baseline_project].hash
+
+            if len(status.projects.items()) == 1:
+                appears_only_once.add(target)
 
             for project_name, project_status in status.projects.items():
                 if project_name == status.baseline_project:
@@ -122,6 +127,7 @@ class ClangPreprocesser(Action):
                         differences[key].add(target)
                         different_files.add(target)
 
+        logging.info(f"Appear only once: {len(appears_only_once)}")
         logging.info(f"Different files: {len(different_files)}")
         for key, value in differences.items():
             logging.info(f"\tDifference: {key}, count: {len(value)}")
