@@ -166,6 +166,8 @@ class BuildGenerator(Action):
             options_select_flags.append((None,))
 
         # FIXME: test it for multiple combinations
+        working_dir = os.path.join(run_config.working_directory)
+        os.makedirs(working_dir, exist_ok=True)
 
         for option_name, option, flag in zip(
             options_names, options_select, options_select_flags, strict=True
@@ -173,13 +175,14 @@ class BuildGenerator(Action):
             for active, nonactive in subsets:
                 build_dir = self.generate_name(active, option)
 
-                docker_image = f"{run_config.docker_image}-{run_config.project_name}"
+                docker_image = f"{run_config.docker_image_dev}"
 
                 if len(run_config.layers_deps) > 0:
                     logging.info(
                         f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
                     )
 
+                    docker_image = f"{run_config.docker_image}-{run_config.project_name}"
                     # FIXME: support multiple values
                     settings = {}
                     for k, v in zip(option_name, option, strict=True):
@@ -190,24 +193,23 @@ class BuildGenerator(Action):
                     )
                     name_suffix = "_".join(flag_names)
 
-                    build_dir = os.path.join(run_config.working_directory)
-                    os.makedirs(build_dir, exist_ok=True)
-                    dockerfile_path = os.path.join(build_dir, "images", name_suffix, "Dockerfile")
+                    dockerfile_path = os.path.join(working_dir, "images", name_suffix, "Dockerfile")
+                    os.makedirs(os.path.join(working_dir, "images", name_suffix), exist_ok=True)
 
                     with open(dockerfile_path, "w") as f:
                         f.write(dockerfile_content)
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
                     logging.info(
-                        f"[{self.name}] Building Docker image: {run_config.docker_image}, in {build_dir}"
+                        f"[{self.name}] Building Docker image: {run_config.docker_image}, in {working_dir}"
                     )
 
                     if len(name_suffix) > 0:
                         docker_image = f"{docker_image}-{name_suffix}"
 
                     self.docker_runner.build(
-                        dockerfile=os.path.join("images", name_suffix, "Dockerfile"),
-                        path=build_dir,
+                        dockerfile=os.path.join(name_suffix, "Dockerfile"),
+                        path=os.path.join(working_dir, "images"),
                         tag=f"{XaaSConfig().docker_repository}:{docker_image}",
                     )
 
@@ -228,7 +230,9 @@ class BuildGenerator(Action):
                     if arg is not None:
                         cmake_args.append(f"-D{arg}")
 
-                logging.info(f"Executing build in {new_dir}, combination: {active}")
+                logging.info(
+                    f"Executing build in {new_dir}, image {docker_image}, combination: {active}"
+                )
 
                 configure_cmd = [
                     "bash",
