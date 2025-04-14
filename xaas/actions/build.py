@@ -19,9 +19,9 @@ from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 @dataclass
 class CPUTuningFeatures(DataClassYAMLMixin):
-    target_cpu: str | None = ""
-    target_features: str | None = ""
-    tune_cpu: str | None = ""
+    target_cpu: str | None = None
+    target_features: str | None = None
+    tune_cpu: str | None = None
 
 
 @dataclass

@@ -12,6 +12,7 @@ from xaas.actions.container import DockerImageBuilder
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
+from xaas.actions.cpu_tuning import CPUTuning
 from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import DeployConfig, RunConfig
@@ -73,7 +74,8 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
     run_config = RunConfig.load(config)
 
     config_obj = AnalyzerConfig.load(
-        os.path.join(run_config.working_directory, "build_analyze.yml")
+        # os.path.join(run_config.working_directory, "build_analyze.yml")
+        os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
     action = ClangPreprocesser(parallel_workers, openmp_check)
     action.validate(config_obj)
@@ -92,6 +94,26 @@ def preprocess_summary(config) -> None:
     )
     action = ClangPreprocesser(1, False)
     action.print_summary(config_obj)
+
+
+@cli.group("cpu-tuning")
+def cpu_tuning():
+    pass
+
+
+@cpu_tuning.command("run")
+@click.argument("config", type=click.Path(exists=True))
+def cpu_tuning_run(config) -> None:
+    initialize()
+
+    run_config = RunConfig.load(config)
+
+    config_obj = AnalyzerConfig.load(
+        os.path.join(run_config.working_directory, "build_analyze.yml")
+    )
+    action = CPUTuning()
+    action.validate(config_obj)
+    action.execute(config_obj)
 
 
 @cli.group()
