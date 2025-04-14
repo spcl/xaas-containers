@@ -116,6 +116,18 @@ def cpu_tuning_run(config) -> None:
     action.execute(config_obj)
 
 
+@cpu_tuning.command("summary")
+@click.argument("config", type=click.Path(exists=True))
+def cpu_tuning_summary(config) -> None:
+    initialize()
+
+    run_config = RunConfig.load(config)
+
+    config_obj = AnalyzerConfig.load(os.path.join(run_config.working_directory, "cpu_tuning.yml"))
+    action = BuildAnalyzer()
+    action.print_summary(config_obj)
+
+
 @cli.group()
 def ir():
     pass
