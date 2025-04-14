@@ -76,8 +76,8 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
     run_config = RunConfig.load(config)
 
     config_obj = AnalyzerConfig.load(
-        # os.path.join(run_config.working_directory, "build_analyze.yml")
-        os.path.join(run_config.working_directory, "cpu_tuning.yml")
+        os.path.join(run_config.working_directory, "build_analyze.yml")
+        # os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
     action = ClangPreprocesser(parallel_workers, openmp_check)
     action.validate(config_obj)
@@ -110,8 +110,8 @@ def cpu_tuning_run(config) -> None:
 
     run_config = RunConfig.load(config)
 
-    config_obj = AnalyzerConfig.load(
-        os.path.join(run_config.working_directory, "build_analyze.yml")
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "preprocess.yml")
     )
     action = CPUTuning()
     action.validate(config_obj)
@@ -125,8 +125,10 @@ def cpu_tuning_summary(config) -> None:
 
     run_config = RunConfig.load(config)
 
-    config_obj = AnalyzerConfig.load(os.path.join(run_config.working_directory, "cpu_tuning.yml"))
-    action = BuildAnalyzer()
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "cpu_tuning.yml")
+    )
+    action = ClangPreprocesser(1, False)
     action.print_summary(config_obj)
 
 
@@ -145,7 +147,7 @@ def ir_compiler_run(config, parallel_workers, build_project) -> None:
     run_config = RunConfig.load(config)
 
     config_obj = PreprocessingResult.load(
-        os.path.join(run_config.working_directory, "preprocess.yml")
+        os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
     action = IRCompiler(parallel_workers, build_project)
     action.validate(config_obj)

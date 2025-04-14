@@ -162,7 +162,10 @@ class DeployConfig(DataClassYAMLMixin):
     working_directory: str
     features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
-    features_select: dict[FeatureSelectionType | str, str]
+    features_select: dict[str, str]
+    # FIXME: hide this config in image config
+    # should be selected by features automatically
+    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
     @staticmethod
     def load(config_path: str) -> DeployConfig:

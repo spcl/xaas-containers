@@ -100,7 +100,7 @@ class CPUTuning(Action):
     #    for key, value in difference_identical_hash.items():
     #        logging.info(f"\tDifference: {key}, count: {len(value)}")
 
-    def execute(self, config: AnalyzerConfig) -> bool:
+    def execute(self, config: PreprocessingResult) -> bool:
         logging.info(f"[{self.name}] Preprocessing project {config.build.project_name}")
 
         Container = namedtuple("Container", ["container", "working_dir"])  # noqa: F821
@@ -134,42 +134,68 @@ class CPUTuning(Action):
                     target,
                 )
 
-            for target, status in list(config.build_comparison.source_files.items()):
-                baseline_flags: set[str] = status.default_command.cpu_tuning
+            for target, status in list(config.targets.items()):
+                baseline_flags: set[str] = status.baseline_command.cpu_tuning
 
-                cmd = config.build_comparison.project_results[status.default_build].files[target]
+                cmd = status.baseline_command
+                # baseline_projectbaseline_projectprojects[status.baseline_project].files[target]
                 self.get_flags(
                     config,
-                    containers[status.default_build].container,
+                    containers[status.baseline_project].container,
                     baseline_flags,
                     target,
                     cmd,
-                    containers[status.default_build].working_dir,
+                    containers[status.baseline_project].working_dir,
                 )
 
-                for project_name, project_status in status.divergent_projects.items():
-                    if DivergenceReason.COMPILER in project_status.reasons:
+                # FIXME: dirty and simpliistic implementation
+                # in the long run, we need to detect groups like in the OMP impl
+                # merge with the OMP implementation - similar logic
+                files_divergent = 0
+                for project_name, project_status in status.projects.items():
+                    if DivergenceReason.CPU_TUNING in project_status.cmd_differences.reasons:
+                        for (
+                            nested_project_name,
+                            nested_project_status,
+                        ) in status.projects.items():
+                            if project_name == nested_project_name:
+                                continue
+
+                            if project_status.hash == nested_project_status.hash:
+                                files_divergent += 1
+
+                # FIXME: this is a hck to not process files with differnet hash
+                # needs proper invesigation
+                if files_divergent == 0:
+                    continue
+
+                for project_name, project_status in status.projects.items():
+                    if DivergenceReason.COMPILER in project_status.cmd_differences.reasons:
                         continue
 
-                    if DivergenceReason.CPU_TUNING in project_status.reasons:
+                    if DivergenceReason.CPU_TUNING in project_status.cmd_differences.reasons:
                         new_flags = set(
-                            project_status.reasons[DivergenceReason.CPU_TUNING]["added"]
+                            project_status.cmd_differences.reasons[DivergenceReason.CPU_TUNING][
+                                "added"
+                            ]
                         )
                         new_flags = new_flags | (
                             baseline_flags
-                            - set(project_status.reasons[DivergenceReason.CPU_TUNING]["removed"])
+                            - set(
+                                project_status.cmd_differences.reasons[DivergenceReason.CPU_TUNING][
+                                    "removed"
+                                ]
+                            )
                         )
                         self.get_flags(
                             config,
-                            containers[status.default_build].container,
+                            containers[status.baseline_project].container,
                             baseline_flags,
                             target,
                             cmd,
-                            containers[status.default_build].working_dir,
+                            containers[status.baseline_project].working_dir,
                         )
-                        divergent_cmd = config.build_comparison.project_results[project_name].files[
-                            target
-                        ]
+                        divergent_cmd = project_status.command
                         self.get_flags(
                             config,
                             containers[project_name].container,
@@ -178,11 +204,11 @@ class CPUTuning(Action):
                             divergent_cmd,
                             containers[project_name].working_dir,
                         )
-                        status.cpu_tuning[status.default_build] = baseline_flags
-                        status.cpu_tuning[project_name] = new_flags
+                        status.projects[status.baseline_project].cpu_tuning = baseline_flags
+                        project_status.cpu_tuning = new_flags
 
                         logging.debug(f"[{self.name}] Simplify file {target}")
-                        del project_status.reasons[DivergenceReason.CPU_TUNING]
+                        del project_status.cmd_differences.reasons[DivergenceReason.CPU_TUNING]
 
                         # sanity check
                         for flags in [baseline_flags, new_flags]:
@@ -202,7 +228,7 @@ class CPUTuning(Action):
 
     def get_flags(
         self,
-        config: AnalyzerConfig,
+        config: PreprocessingResult,
         container: Container,
         flags: set[str],
         target: str,

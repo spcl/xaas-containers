@@ -36,10 +36,12 @@ class IRFileStatus(DataClassYAMLMixin):
 
 @dataclass
 class FileStatus(DataClassYAMLMixin):
-    # command: CompileCommand
+    command: CompileCommand
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
+    # cpu_tuning: set[str] = field(default_factory=set)
+    # cpu_tuning: dict[str, set[str]] = field(default_factory=dict)
     cpu_tuning: set[str] = field(default_factory=set)
 
 
@@ -88,7 +90,7 @@ class ClangPreprocesser(Action):
 
         self.parallel_workers = parallel_workers
         self.openmp_check = openmp_check
-        self.CLANG_PATH = "/usr/bin/clang++-19"
+        self.CLANG_PATH = "/usr/bin/clang++"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
     def print_summary(self, config: PreprocessingResult) -> None:
@@ -200,12 +202,9 @@ class ClangPreprocesser(Action):
                                 baseline_command=status.default_command,
                             )
                             process_result.projects[status.default_build] = FileStatus(
+                                status.default_command,
                                 ProjectDivergence(),
                             )
-                            if status.default_build in status.cpu_tuning:
-                                process_result.projects[
-                                    status.default_build
-                                ].cpu_tuning = status.cpu_tuning[status.default_build]
 
                             # FIXME: we should remove divergent projects earlier
                             is_divergent = len(status.divergent_projects) > 0
@@ -222,15 +221,13 @@ class ClangPreprocesser(Action):
                                     But we need to note that all projects using it should include it.
                                 """
                                 for project in status.present_in_projects:
+                                    cmd = config.build_comparison.project_results[project].files[
+                                        target
+                                    ]
                                     process_result.projects[project] = FileStatus(
-                                        ProjectDivergence()
+                                        cmd, ProjectDivergence()
                                     )
                                     process_result.projects[project].hash = "IDENTICAL"
-
-                                    if status.default_build in status.cpu_tuning:
-                                        process_result.projects[
-                                            project
-                                        ].cpu_tuning = status.cpu_tuning[project]
 
                                 new_results.targets[target] = process_result
                                 continue
@@ -252,11 +249,7 @@ class ClangPreprocesser(Action):
                             for name, div_status in status.divergent_projects.items():
                                 cmd = config.build_comparison.project_results[name].files[target]
 
-                                process_result.projects[name] = FileStatus(div_status)
-                                if status.default_build in status.cpu_tuning:
-                                    process_result.projects[name].cpu_tuning = status.cpu_tuning[
-                                        name
-                                    ]
+                                process_result.projects[name] = FileStatus(cmd, div_status)
                                 futures.append(
                                     executor.submit(
                                         self._preprocess_file,
