@@ -334,6 +334,10 @@ class ClangPreprocesser(Action):
         command: CompileCommand,
         working_dir: str,
     ) -> tuple[str, bool] | None:
+        # FIXME: better check
+        if command.compiler != "/usr/bin/c++":
+            return None
+
         """
         Remove comments.
         Otherwise, Clang will put a lot of additional comments for headers and flags.
