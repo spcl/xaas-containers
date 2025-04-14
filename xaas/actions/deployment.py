@@ -43,7 +43,7 @@ class Deployment(Action):
 
         return True
 
-    def _generate_dockerfile(self, name: str, config: DeployConfig) -> str:
+    def _generate_dockerfile(self, build_dir_name: str, config: DeployConfig) -> str:
         # FIXME: support non-boolean layers
 
         lines = []
@@ -51,6 +51,7 @@ class Deployment(Action):
         runtime_copies = []
 
         layers_to_add = []
+        build_option = {}
 
         for feature, value in config.features_boolean.items():
             if not value:
@@ -77,19 +78,48 @@ class Deployment(Action):
                 f"COPY --link --from={layer_name}-layer {layer_runtime_location} {layer_runtime_location}"
             )
 
+        for x, val in config.features_select.items():
+            build_option[x] = val
+
+        for dep_name, dependency in config.layers_deps.items():
+            # FIXME: merge with the similar implementation in build. separate module
+            dep_cfg = XaaSConfig().layers.layers_deps[dep_name]
+            layer_build_location = dep_cfg.build_location.replace("${version}", dep_cfg.version)
+            layer_runtime_location = dep_cfg.runtime_location.replace("${version}", dep_cfg.version)
+
+            name = dep_cfg.name.replace("${version}", dep_cfg.version)
+            for arg, value in dependency.arg_mapping.items():
+                if not dep_cfg.arg_mapping:
+                    continue
+
+                if arg in dep_cfg.arg_mapping:
+                    flag_name = dep_cfg.arg_mapping[arg].flag_name
+                    flag_value = build_option[arg]
+
+                    name = name.replace(f"${{{flag_name}}}", flag_value)
+
+            lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}-layer")
+            copies.append(
+                f"COPY --link --from={name}-layer {layer_build_location} {layer_build_location}"
+            )
+            runtime_copies.append(
+                f"COPY --link --from={name}-layer {layer_runtime_location} {layer_runtime_location}"
+            )
+
         lines.append(f"FROM {XaaSConfig().docker_repository}:{config.ir_image} as builder")
         lines.extend(copies)
         lines.extend(
             [
                 "# Add build directories for IR analysis",
-                f"RUN ln -s /builds/build_{name} /build",
+                f"RUN ln -s /builds/build_{build_dir_name} /build",
                 "WORKDIR /build/",
                 # "RUN /bin/bash build.sh && make",
                 f"RUN parallel -j {self.parallel_workers} < build.sh && make",
             ]
         )
 
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{XaaSConfig().runner_image}")
+        # FIXME: conditional
+        lines.append(f"FROM {XaaSConfig().docker_repository}:{XaaSConfig().runner_image}-dev")
         lines.append("COPY --link --from=builder /build /build")
         lines.extend(runtime_copies)
 
