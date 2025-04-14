@@ -83,10 +83,6 @@ struct ReplaceTargetFeaturesPass
 
     for (Function &F : M) {
 
-      if (F.isDeclaration()) {
-        continue;
-      }
-
       if (F.hasFnAttribute("target-features")) {
 
         if (QueryFeatures) {
