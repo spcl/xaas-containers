@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from xaas.actions.action import Action
+from xaas.actions.analyze import DivergenceReason, CompileCommand
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.ir import PreprocessingResult
 from xaas.actions.preprocess import FileStatus
@@ -20,6 +21,8 @@ class DockerImageBuilder(Action):
         )
         self.BASE_IMAGE = "spcleth/xaas:llvm-19"
         self.BASE_IMAGE_DEV = "spcleth/xaas:llvm-19-dev"
+
+        self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
 
     def execute(self, config: PreprocessingResult) -> bool:
         project_name = config.build.project_name
@@ -85,6 +88,11 @@ class DockerImageBuilder(Action):
 
             ir_file = result.projects[project_dir].ir_file.file
             ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
+
+            # TODO: is this general enough?
+            compiler = ir_cmd.split(" ")[0]
+            ir_cmd = ir_cmd.replace(compiler, f"{compiler} -xir")
+
             # make sure the path does not mess anything else
             # this happens in gromacs - path to target is included in our path to ir file
             # we can't do whole word boundary with \b because we have slashes, which
@@ -104,12 +112,23 @@ class DockerImageBuilder(Action):
 
         return ("\n".join(lines), uses_dev)
 
-    def _cpu_tune(self, ir_file: str, project: FileStatus, build_config: BuildConfig) -> str:
+    def _cpu_tune(
+        self,
+        ir_file: str,
+        project: FileStatus,
+        build_config: BuildConfig,
+    ) -> str:
+        # FIXME: sanity check - this needs proper testing
+        # We might miss some optimization flags
+        # but it should be possible in theory
+        if DivergenceReason.OPTIMIZATIONS in project.cmd_differences.reasons:
+            raise NotImplementedError()
+
         # We do two steps
         # (1) We run the custom opt pass to replace targets
         # (2) We run optimizations (together with the previous one)
         # FIXME: hardcoding
-        cmd = "/opt/llvm/bin/opt -load-pass-plugin /tools/build/libReplaceTargetFeatures.so "
+        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/build/libReplaceTargetFeatures.so "
         cmd += '-passes="replace-target-features" '
 
         if project.cpu_tuning:
@@ -129,6 +148,7 @@ class DockerImageBuilder(Action):
                 raise RuntimeError("Not found!")
 
         cmd += f"{ir_file} -o {ir_file}"
+
         return cmd
 
     def _generate_dockerfile(
