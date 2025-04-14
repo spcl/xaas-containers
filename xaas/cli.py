@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 import click
 
@@ -17,6 +18,7 @@ from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import DeployConfig, RunConfig
 from xaas.config import XaaSConfig
+from xaas.actions.docker import Runner as DockerRunner
 
 
 def initialize():
@@ -189,6 +191,43 @@ def deploy(config, parallel_workers) -> None:
     action = Deployment(parallel_workers)
     action.validate(config_obj)
     action.execute(config_obj)
+
+
+@cli.command("build-deps")
+@click.argument("dep_name", type=str)
+def build_deps(dep_name: str) -> None:
+    initialize()
+
+    DOCKERFILES_DIR = os.path.join(Path(__file__).parent.parent, "dockerfiles")
+
+    if dep_name not in XaaSConfig().layers.layers_deps:
+        raise ValueError(f"Dependency {dep_name} not found in configuration.")
+
+    dep_config = XaaSConfig().layers.layers_deps[dep_name]
+    print(dep_config)
+
+    docker_runner = DockerRunner(XaaSConfig().docker_repository)
+
+    if dep_config.arg_mapping:
+        for _, flag_config in dep_config.arg_mapping.items():
+            for flag_value, build_arg in flag_config.build_args.items():
+                name = dep_config.name.replace("${version}", dep_config.version)
+                print(name, flag_config.flag_name, flag_value)
+                name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+
+                build_args = {flag_config.flag_name: build_arg}
+
+                print(name, build_args)
+
+                dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+                print(
+                    docker_runner.build(
+                        dockerfile=dockerfile,
+                        path=os.path.curdir,
+                        tag=f"{XaaSConfig().docker_repository}:{name}",
+                        build_args=build_args,
+                    )
+                )
 
 
 def main() -> None:
