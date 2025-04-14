@@ -1,0 +1,7 @@
+FROM spcleth/xaas:llvm-19-dev
+
+
+ENV Clang_DIR=/opt/llvm/lib/cmake/clang
+RUN mkdir /tools 
+ADD tools/ /tools/openmp-finder
+RUN cd /tools/openmp-finder && cmake -DCMAKE_BUILD_TYPE=Release . && make 
