@@ -1,11 +1,18 @@
 layers:
   MPI:
+    version: 4.3.0
     name: mpich
     build_location: /opt/mpich
     runtime_location: /opt/mpich
+  CUDA:
+    name: cuda-${version}
+    version: 12.8
+    build_location: /usr/local/cuda-${version}
+    runtime_location: /usr/local/cuda-${version}
 layers_deps:
   fftw3:
     name: deps-fftw3
+    version: 3.3.10
     build_location: /opt/fftw3
     runtime_location: /opt/fftw3
     envs:

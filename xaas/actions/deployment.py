@@ -50,21 +50,32 @@ class Deployment(Action):
         copies = []
         runtime_copies = []
 
+        layers_to_add = []
+
         for feature, value in config.features_boolean.items():
             if not value:
                 continue
             if feature in XaaSConfig().layers.layers:
-                layer = XaaSConfig().layers.layers[feature]
+                layers_to_add.append(XaaSConfig().layers.layers[feature])
 
-                lines.append(
-                    f"FROM {XaaSConfig().docker_repository}:{layer.name} as {layer.name}-layer"
-                )
-                copies.append(
-                    f"COPY --from={layer.name}-layer {layer.build_location} {layer.build_location}"
-                )
-                runtime_copies.append(
-                    f"COPY --from={layer.name}-layer {layer.runtime_location} {layer.runtime_location}"
-                )
+        for feature in config.features_enabled:
+            if feature in XaaSConfig().layers.layers:
+                layers_to_add.append(XaaSConfig().layers.layers[feature])
+
+        for layer in layers_to_add:
+            layer_name = layer.name.replace("${version}", layer.version)
+            layer_build_location = layer.build_location.replace("${version}", layer.version)
+            layer_runtime_location = layer.runtime_location.replace("${version}", layer.version)
+
+            lines.append(
+                f"FROM {XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
+            )
+            copies.append(
+                f"COPY --link --from={layer_name}-layer {layer_build_location} {layer_build_location}"
+            )
+            runtime_copies.append(
+                f"COPY --link --from={layer_name}-layer {layer_runtime_location} {layer_runtime_location}"
+            )
 
         lines.append(f"FROM {XaaSConfig().docker_repository}:{config.ir_image} as builder")
         lines.extend(copies)
@@ -79,7 +90,7 @@ class Deployment(Action):
         )
 
         lines.append(f"FROM {XaaSConfig().docker_repository}:{XaaSConfig().runner_image}")
-        lines.append("COPY --from=builder /build /build")
+        lines.append("COPY --link --from=builder /build /build")
         lines.extend(runtime_copies)
 
         return "\n".join(lines)
