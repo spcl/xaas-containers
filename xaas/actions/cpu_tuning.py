@@ -148,6 +148,9 @@ class CPUTuning(Action):
                 )
 
                 for project_name, project_status in status.divergent_projects.items():
+                    if DivergenceReason.COMPILER in project_status.reasons:
+                        continue
+
                     if DivergenceReason.CPU_TUNING in project_status.reasons:
                         new_flags = set(
                             project_status.reasons[DivergenceReason.CPU_TUNING]["added"]
@@ -178,6 +181,7 @@ class CPUTuning(Action):
                         status.cpu_tuning[status.default_build] = baseline_flags
                         status.cpu_tuning[project_name] = new_flags
 
+                        logging.debug(f"[{self.name}] Simplify file {target}")
                         del project_status.reasons[DivergenceReason.CPU_TUNING]
 
                         # sanity check
