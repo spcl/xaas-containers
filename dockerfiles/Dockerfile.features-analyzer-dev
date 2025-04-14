@@ -1,6 +1,6 @@
 FROM spcleth/xaas:llvm-19-dev
 
-RUN apt-get update && apt-get install libclang-19-dev zstd libzstd-dev
+#RUN apt-get update && apt-get install libclang-19-dev zstd libzstd-dev
 
 #RUN mkdir /tools && chown docker_user:docker_user /tools
 RUN mkdir /tools  && mkdir /tools/build
