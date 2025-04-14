@@ -55,7 +55,7 @@ class SourceFileStatus(DataClassYAMLMixin):
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
 
-    cpu_tuning: dict[str, set[str]] = field(default_factory=dict)
+    # cpu_tuning: dict[str, set[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -229,6 +229,21 @@ class BuildAnalyzer(Action):
                 "added": includes_diff1,
                 "removed": includes_diff2,
             }
+        # FIXME: added/removed is not the best match here
+        # if we point to different build directories,
+        # these could include different configs!
+        added = []
+        for incl in [*cmd1.includes, *cmd2.includes]:
+            if "/build" in incl:
+                added.append(incl)
+        if len(added) > 0:
+            if DivergenceReason.INCLUDES in differences:
+                differences[DivergenceReason.INCLUDES]["added"].update(added)
+            else:
+                differences[DivergenceReason.INCLUDES] = {
+                    "added": added,
+                    "removed": [],
+                }
 
         defines_diff1 = cmd2.definitions - cmd1.definitions
         defines_diff2 = cmd1.definitions - cmd2.definitions
