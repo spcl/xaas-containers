@@ -168,7 +168,7 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=config.build.docker_image,
+                image=build.docker_image,
                 mounts=volumes,
                 remove=False,
                 detach=True,

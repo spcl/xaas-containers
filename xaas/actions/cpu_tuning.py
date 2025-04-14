@@ -52,7 +52,7 @@ class CPUTuning(Action):
 
     def __init__(self):
         super().__init__(name="clang-vectorizer", description="Detect vectorization flags .")
-        self.CLANG_PATH = "/usr/bin/clang++-19"
+        self.CLANG_PATH = "/usr/bin/c++"
 
         self.SUPPORTED_FLAGS: set[str] = {"mavx", "mfma"}
 

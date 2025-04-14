@@ -167,7 +167,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=config.build.docker_image,
+                        image=build.docker_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,
@@ -207,7 +207,16 @@ class ClangPreprocesser(Action):
                                     status.default_build
                                 ].cpu_tuning = status.cpu_tuning[status.default_build]
 
-                            if len(status.divergent_projects) == 0:
+                            # FIXME: we should remove divergent projects earlier
+                            is_divergent = len(status.divergent_projects) > 0
+                            if is_divergent:
+                                is_divergent = False
+                                for project in status.divergent_projects.values():
+                                    if len(project.reasons) > 0:
+                                        is_divergent = True
+                                        break
+
+                            if not is_divergent:
                                 """
                                     This file is identical across all builds - we can skip it.
                                     But we need to note that all projects using it should include it.
@@ -268,7 +277,16 @@ class ClangPreprocesser(Action):
 
                         result_iter = iter(results)
                         for target, status in slice_projects:
-                            if len(status.divergent_projects) == 0:
+                            # FIXME: we should remove divergent projects earlier
+                            is_divergent = len(status.divergent_projects) > 0
+                            if is_divergent:
+                                is_divergent = False
+                                for project in status.divergent_projects.values():
+                                    if len(project.reasons) > 0:
+                                        is_divergent = True
+                                        break
+
+                            if not is_divergent:
                                 logging.debug(f"Skipping {target}, no differences found")
                                 continue
 
