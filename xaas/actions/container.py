@@ -156,10 +156,6 @@ class DockerImageBuilder(Action):
     ) -> str:
         lines = []
 
-        for dep in config.build.layers_deps:
-            dep_cfg = XaaSConfig().layers.layers_deps[dep]
-            lines.append(f"FROM {XaaSConfig().docker_repository}:{dep_cfg.name} as {dep_cfg.name}")
-
         # FIXME: full dev image!
         if uses_dev_image:
             lines.append(f"FROM {self.BASE_IMAGE_DEV} AS llvm-dev")
@@ -172,11 +168,6 @@ class DockerImageBuilder(Action):
             ]
         )
 
-        for dep in config.build.layers_deps:
-            dep_cfg = XaaSConfig().layers.layers_deps[dep]
-            lines.append(
-                f"COPY --from={dep_cfg.name} {dep_cfg.build_location} {dep_cfg.build_location}"
-            )
         # FIXME: full dev image!
         if uses_dev_image:
             lines.append("COPY --from=llvm-dev /opt/llvm /opt/llvm")
