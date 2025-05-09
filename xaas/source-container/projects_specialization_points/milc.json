@@ -1,0 +1,143 @@
+{
+    "gpu_build": {
+      "value": true,
+      "build_flag": "-DHAVE_QUDA"
+    },
+    "gpu_backends": {
+      "CUDA": {
+        "used_as_default": false,
+        "build_flag": "-DHAVE_QUDA",
+        "minimum_version": null
+      },
+      "OpenCL": {
+        "used_as_default": false,
+        "build_flag": "-DUSE_CL_GPU",
+        "minimum_version": null
+      }
+    },
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": true,
+        "build_flag": null,
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": false,
+        "build_flag": "-qopenmp",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {
+      "LAPACK": {
+        "used_as_default": false,
+        "build_flag": null,
+        "condition": "WANTPRIMME is true"
+      }
+    },
+    "FFT_libraries": {
+      "FFTW": {
+        "built-in": false,
+        "used_as_default": false,
+        "dependencies": null,
+        "build_flag": null
+      }
+    },
+    "other_external_libraries": {
+      "QMP": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "MPP is true",
+        "build_flag": null
+      },
+      "QIO": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "WANTQIO is true",
+        "build_flag": null
+      },
+      "QOP": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "WANTQOP is true",
+        "build_flag": null
+      },
+      "QUDA": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "WANTQUDA is true",
+        "build_flag": null
+      },
+      "PRIMME": {
+        "version": "1.1",
+        "used_as_default": false,
+        "conditions": "WANTPRIMME is true",
+        "build_flag": null
+      },
+      "QPhiX": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "WANTQPHIX is true",
+        "build_flag": "-DHAVE_QPHIX"
+      }
+    },
+    "compiler_flags": [
+      "-std=c99",
+      "-D_FILE_OFFSET_BITS=64",
+      "-D_LARGEFILE64_SOURCE"
+    ],
+    "optimization_build_flags": [
+      "-O3",
+      "-parallel-source-info=2",
+      "-debug inline-debug-info",
+      "-qopt-report=5",
+      "-DC_GLOBAL_INLINE"
+    ],
+    "compilers": {
+      "gnu": {
+        "minimum_version": null
+      },
+      "intel": {
+        "minimum_version": null
+      },
+      "ibm": {
+        "minimum_version": null
+      },
+      "portland": {
+        "minimum_version": null
+      },
+      "cray-intel": {
+        "minimum_version": null
+      }
+    },
+    "architectures": [
+      "knl",
+      "knc",
+      "hsw"
+    ],
+    "simd_vectorization": {
+      "AVX": {
+        "build_flag": "-mavx",
+        "default": false
+      },
+      "AVX2": {
+        "build_flag": "-xCORE-AVX2",
+        "default": false
+      },
+      "MIC": {
+        "build_flag": "-mmic",
+        "default": false
+      },
+      "AVX512": {
+        "build_flag": "-xMIC-AVX512",
+        "default": false
+      }
+    },
+    "build_system": {
+      "type": "make",
+      "minimum_version": null
+    },
+    "internal_build": {
+      "library_name": "None",
+      "build_flag": null
+    }
+  }

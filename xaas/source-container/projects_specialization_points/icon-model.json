@@ -1,0 +1,217 @@
+{
+    "gpu_build": {
+      "value": true,
+      "build_flag": "--enable-gpu"
+    },
+    "gpu_backends": {
+      "CUDA": {
+        "used_as_default": true,
+        "build_flag": null,
+        "minimum_version": null
+      },
+      "HIP": {
+        "used_as_default": false,
+        "build_flag": null,
+        "minimum_version": null
+      },
+      "OpenACC": {
+        "used_as_default": false,
+        "build_flag": null,
+        "minimum_version": null
+      }
+    },
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": true,
+        "build_flag": "--enable-mpi",
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": false,
+        "build_flag": "--enable-openmp",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {
+      "BLAS": {
+        "used_as_default": true,
+        "build_flag": null,
+        "condition": null
+      },
+      "LAPACK": {
+        "used_as_default": true,
+        "build_flag": null,
+        "condition": null
+      }
+    },
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "NetCDF": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Used if DACE or ART is enabled",
+        "build_flag": null
+      },
+      "HDF5": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Used if EMVORADO is enabled",
+        "build_flag": null
+      },
+      "ZLIB": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Used if EMVORADO is enabled",
+        "build_flag": null
+      },
+      "RTTOV": {
+        "version": "13",
+        "used_as_default": false,
+        "conditions": "Used if --enable-rttov is set",
+        "build_flag": null
+      },
+      "SCT": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-sct is set",
+        "build_flag": null
+      },
+      "YAXT": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-yaxt is set or needed as transitive dependency of other libraries",
+        "build_flag": null
+      },
+      "ECCODES": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if EMVORADO is enabled and --enable-grib2 is set",
+        "build_flag": null
+      },
+      "PPM": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-cdi-pio is set and an external CDI is not used",
+        "build_flag": null
+      },
+      "CDI": {
+        "version": "1.8.x",
+        "used_as_default": false,
+        "conditions": "Bundled version, or external with --with-external-cdi.  Requires patches to 1.8.x",
+        "build_flag": null
+      },
+      "SERIALBOX2": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-serialization is set",
+        "build_flag": null
+      },
+      "MTIME": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if the bundled version is built or an external library is provided",
+        "build_flag": null
+      },
+      "YAC": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-coupling is set and the bundled version is built",
+        "build_flag": null
+      },
+      "TIXI": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if ART is enabled and the bundled version of TIXI library is used",
+        "build_flag": null
+      },
+      "COMIN": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --enable-comin is set and the bundled version is built",
+        "build_flag": null
+      },
+      "FORTRAN-SUPPORT": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Used if --with-external-fortran-support is not specified",
+        "build_flag": null
+      }
+    },
+    "compiler_flags": [
+      "-DHAVE_FC_ATTRIBUTE_CONTIGUOUS",
+      "-D__ICON__",
+      "-D__NO_ICON_ATMO__",
+      "-D__NO_ICON_LES__",
+      "-D__NO_ICON_UPATMO__",
+      "-D__NO_ICON_OCEAN__",
+      "-D__NO_JSBACH__",
+      "-D__NO_JSBACH_HD__",
+      "-D__NO_QUINCY__",
+      "-D__NO_ICON_WAVES__",
+      "-DYAC_coupling",
+      "-D__NO_AES__",
+      "-D__NO_NWP__",
+      "-D__ECRAD",
+      "-D__NO_RTE_RRTMGP__",
+      "-D__USE_RTTOV",
+      "-D__DACE__",
+      "-DHAVE_RADARFWO",
+      "-DTWOMOM_SB_NEW",
+      "-DNUDGING",
+      "-D__ICON_ART",
+      "-D__ART_TMP_IFDEF",
+      "-D__ART_GPL",
+      "-D__NO_ICON_COMIN__",
+      "-DHAVE_ACM_LICENSE",
+      "-DNOMPI",
+      "-DHAVE_SLOW_PASSIVE_TARGET_ONESIDED",
+      "-D__USE_G2G",
+      "-D__HIP__",
+      "-DHAVE_PARALLEL_NETCDF",
+      "-DNO_ASYNC_IO_RMA",
+      "-DHAVE_CDI_PIO",
+      "-D__SCT__",
+      "-DHAVE_YAXT",
+      "-DSERIALIZE",
+      "-DSERIALIZE_READ_REFERENCE",
+      "-DSERIALIZE_PERTURB_REFERENCE",
+      "-DSERIALIZE_CREATE_REFERENCE",
+      "-D__NO_ICON_TESTBED__",
+      "-D__LOOP_EXCHANGE",
+      "-D__SWAPDIM",
+      "-D__REALLOC_BUF",
+      "-DLRTM_FULL_VECTORIZATION",
+      "-D__MIXED_PRECISION",
+      "-DIFORT_CONSISTENCY_ENFORCE",
+      "-DUSE_NCCL",
+      "-DICON_USE_CUDA_GRAPH",
+      "-DWITH_ZLIB",
+      "-DHDF5_RADAR_INPUT",
+      "-DGRIBAPI",
+      "-D_RTTOV_VERSION=13",
+      "-DNO_MPI_RGET",
+      "-DNO_MPI_CHOICE_ARG",
+      "-DNO_MPI_CPTR_ARG",
+      "-DICON_MEMORY_TRACING=1"
+    ],
+    "optimization_build_flags": [],
+    "compilers": {
+      "Fortran": {
+        "minimum_version": null
+      },
+      "C": {
+        "minimum_version": null
+      }
+    },
+    "architectures": [],
+    "simd_vectorization": {},
+    "build_system": {
+      "type": "make",
+      "minimum_version": null
+    },
+    "internal_build": {
+      "library_name": "FORTRAN-SUPPORT",
+      "build_flag": null
+    }
+  }
+  
