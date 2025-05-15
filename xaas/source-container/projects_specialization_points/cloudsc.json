@@ -1,0 +1,95 @@
+{
+    "gpu_build": {
+      "value": true,
+      "build_flag": "--with-gpu"
+    },
+    "gpu_backends": {
+      "cuda": {
+        "used_as_default": false,
+        "build_flag": "--with-cuda",
+        "minimum_version": null
+      },
+      "hip": {
+        "used_as_default": false,
+        "build_flag": "--with-hip",
+        "minimum_version": null
+      },
+      "sycl": {
+        "used_as_default": false,
+        "build_flag": "--with-sycl",
+        "minimum_version": null
+      }
+    },
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": false,
+        "build_flag": "--with-mpi",
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": true,
+        "build_flag": "--without-openmp",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {},
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "serialbox": {
+        "version": "v2.5.4/patched",
+        "used_as_default": false,
+        "conditions": "disables HDF5",
+        "build_flag": "with-serialbox"
+      },
+      "loki": {
+        "version": "v0.2.1",
+        "used_as_default": false,
+        "conditions": "Enable Loki source-to-source transformations",
+        "build_flag": "--with-loki"
+      },
+      "eckit": {
+        "version": "1.24.4",
+        "used_as_default": false,
+        "conditions": "Built and enabled with atlas",
+        "build_flag": "--with-atlas"
+      },
+      "field_api": {
+        "version": "v0.3.0",
+        "used_as_default": false,
+        "conditions": "Requires field_api_definitions=SINGLE for single precision",
+        "build_flag": null
+      },
+      "fckit": {
+        "version": "0.11.0",
+        "used_as_default": false,
+        "conditions": "Built and enabled with atlas",
+        "build_flag": "--with-atlas"
+      },
+      "atlas": {
+        "version": "feature/MultiField",
+        "used_as_default": false,
+        "conditions": "Incompatible with single precision",
+        "build_flag": "--with-atlas"
+      }
+    },
+    "compiler_flags": [
+      "toolchain",
+      "loki-frontend",
+      "hdf5",
+      "without-hdf5",
+      "serialbox-experimental"
+    ],
+    "optimization_build_flags": [],
+    "compilers": {},
+    "architectures": [],
+    "simd_vectorization": {},
+    "build_system": {
+      "type": "cmake",
+      "minimum_version": null
+    },
+    "internal_build": {
+      "library_name": "serialbox",
+      "build_flag": "--with-serialbox"
+    }
+  }
+  

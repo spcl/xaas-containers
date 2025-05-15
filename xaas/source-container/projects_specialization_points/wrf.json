@@ -1,0 +1,100 @@
+{
+    "gpu_build": {
+      "value": false,
+      "build_flag": null
+    },
+    "gpu_backends": {},
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": false,
+        "build_flag": "USE_MPI=1",
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": false,
+        "build_flag": "USE_OPENMP=1",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {},
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "HDF5": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "USE_HDF5",
+        "build_flag": null
+      },
+      "Jasper": {
+        "version": "1.900.1...<1.900.24",
+        "used_as_default": false,
+        "conditions": "USE_JASPER",
+        "build_flag": null
+      },
+      "PIO": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "USE_PIO",
+        "build_flag": null
+      },
+      "RPC": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "ENABLE_TERRAIN",
+        "build_flag": null
+      },
+      "netCDF": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "NETCDF",
+        "build_flag": null
+      },
+      "netCDF-Fortran": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "NETCDF",
+        "build_flag": null
+      },
+      "pnetCDF": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "Optional",
+        "build_flag": null
+      },
+      "ZLIB": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Required",
+        "build_flag": null
+      },
+      "CURL": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Required",
+        "build_flag": null
+      }
+    },
+    "compiler_flags": [
+      "-P -nostdinc -traditional"
+    ],
+    "optimization_build_flags": [],
+    "compilers": {
+      "Fortran": {
+        "minimum_version": null
+      },
+      "C": {
+        "minimum_version": null
+      }
+    },
+    "architectures": [],
+    "simd_vectorization": {},
+    "build_system": {
+      "type": "cmake",
+      "minimum_version": "3.20"
+    },
+    "internal_build": {
+      "library_name": "FFTW",
+      "build_flag": null
+    }
+  }
+  

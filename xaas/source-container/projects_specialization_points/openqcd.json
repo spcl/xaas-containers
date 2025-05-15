@@ -1,0 +1,71 @@
+{
+    "gpu_build": {
+      "value": false,
+      "build_flag": null
+    },
+    "gpu_backends": {},
+    "parallel_programming_libraries": {
+      "OpenMP": {
+        "used_as_default": true,
+        "build_flag": "-fopenmp",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {},
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "m": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": null,
+        "build_flag": "-lm"
+      }
+    },
+    "compiler_flags": [
+      "-std=c89",
+      "-pedantic",
+      "-fstrict-aliasing",
+      "-Wall",
+      "-Wno-long-long",
+      "-Wno-format-overflow",
+      "-Wstrict-prototypes",
+      "-Werror",
+      "-O",
+      "-mfpmath=sse"
+    ],
+    "optimization_build_flags": [
+      "-DAVX",
+      "-DFMA3",
+      "-DPM", 
+      "-DAVX512"
+    ],
+    "compilers": {
+      "GCC": {
+        "minimum_version": null
+      },
+      "mpicc": {
+        "minimum_version": null
+      }
+    },
+    "architectures": [
+      "x86-64"
+    ],
+    "simd_vectorization": {
+      "AVX": {
+        "build_flag": "-mno-avx",
+        "default": false
+      },
+      "SSE": {
+        "build_flag": "-mfpmath=sse",
+        "default": true
+      }
+    },
+    "build_system": {
+      "type": "make",
+      "minimum_version": null
+    },
+    "internal_build": {
+      "library_name": null,
+      "build_flag": null
+    }
+  }
