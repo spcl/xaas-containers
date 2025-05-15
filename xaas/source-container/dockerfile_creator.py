@@ -22,10 +22,8 @@ class DockerfileCreator:
 
 
     def add_base_image(self):
-        # Users can provide a custom base image
-        if self.base_image is not None:
-            base_image = self.base_image
-        elif self.architecture == "x86_64":
+
+        if self.architecture == "x86_64":
             base_image = "ealnuaimi/xaas:ubuntu20.04-mpich3.1.4-v1.1"
         elif self.architecture == "aarch64":
             base_image = "ealnuaimi/xaas:ubuntu22.04-mpich3.4-arm-gnu13"
@@ -33,11 +31,24 @@ class DockerfileCreator:
             raise ValueError(f"Unsupported architecture: {self.architecture}")
 
         base_image_content = f"""
-        FROM {base_image}
+        FROM {base_image} AS SOURCE 
         # Use Bash as the default shell for all RUN commands
         SHELL ["/bin/bash", "-c"]
         """
         self.dockerfile_content.append(base_image_content.strip())
+
+
+    def add_multistage_phase(self):
+
+        if self.base_image is not None:
+            base_image_content = f"""
+            FROM {self.base_image} AS DEPLOYMENT 
+            # Use Bash as the default shell for all RUN commands
+            SHELL ["/bin/bash", "-c"]
+            """
+            self.dockerfile_content.append(base_image_content.strip())
+
+        
     
     def process_specializations(self):
         if self.selected_specializations.get("gpu_backends"):
@@ -227,6 +238,15 @@ class DockerfileCreator:
         """
         self.dockerfile_content.append(content.strip())
 
+    def copy_from_first_build_stage(self):
+        app_name = os.path.basename(os.path.normpath(self.project_directory))
+
+        content = f"""
+        COPY --from=SOURCE /{app_name} /{app_name}
+        WORKDIR /{app_name}
+        """
+        self.dockerfile_content.append(content.strip())
+
     def application_build_command(self): 
         # CMake project 
         if self.project_directory in ["q-e", "gromacs-2025.0", "vpic-kokkos", "llama.cpp", "dwarf-p-cloudsc", "icon-model"]:
@@ -241,9 +261,15 @@ class DockerfileCreator:
 
     def create_dockerfile(self):
 
+        # source container 
         self.add_base_image()
-        self.process_specializations()
         self.copy_project_directory()
+
+        # multi-stage build (deployment))
+
+        self.add_multistage_phase()
+        self.process_specializations()
+        self.copy_from_first_build_stage
         self.application_build_command()
         self.add_default_command()
         
