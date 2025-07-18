@@ -170,7 +170,8 @@ def ir_compiler_run_summary(config) -> None:
 
 @cli.command()
 @click.argument("config", type=click.Path(exists=True))
-def container(config) -> None:
+@click.option("--docker-repository", type=str, default="spcleth:xaas", help="Docker repository")
+def container(config, docker_repository) -> None:
     initialize()
 
     run_config = RunConfig.load(config)
@@ -178,7 +179,7 @@ def container(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "ir_compilation.yml")
     )
-    action = DockerImageBuilder()
+    action = DockerImageBuilder(docker_repository=docker_repository)
     action.validate(config_obj)
     action.execute(config_obj)
 

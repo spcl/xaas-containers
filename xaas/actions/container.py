@@ -14,7 +14,7 @@ from xaas.config import XaaSConfig
 
 
 class DockerImageBuilder(Action):
-    def __init__(self):
+    def __init__(self, docker_repository: str):
         super().__init__(
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
@@ -24,9 +24,11 @@ class DockerImageBuilder(Action):
 
         self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
 
+        self.docker_repository = docker_repository
+
     def execute(self, config: PreprocessingResult) -> bool:
         project_name = config.build.project_name
-        image_name = f"spcleth/xaas:{project_name}-ir"
+        image_name = f"{self.docker_repository}:{project_name}-ir"
 
         logging.info(f"[{self.name}] Building Docker image {image_name} for project {project_name}")
 
@@ -74,6 +76,9 @@ class DockerImageBuilder(Action):
         compile_dbs = {entry["output"]: entry for entry in data}
 
         for target, result in config.targets.items():
+            if project_dir not in result.projects:
+                continue
+
             cmake_cmd = compile_dbs[target]["command"]
             cmake_directory = compile_dbs[target]["directory"]
 
