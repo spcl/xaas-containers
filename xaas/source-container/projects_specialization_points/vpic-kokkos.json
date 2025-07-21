@@ -1,0 +1,89 @@
+{
+    "gpu_build": {
+      "value": true,
+      "build_flag": null
+    },
+    "gpu_backends": {
+      "CUDA": {
+        "used_as_default": false,
+        "build_flag": "-DENABLE_KOKKOS_CUDA",
+        "minimum_version": null
+      }
+    },
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": true,
+        "build_flag": null,
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": true,
+        "build_flag": "-DENABLE_KOKKOS_OPENMP",
+        "minimum_version": null
+      },
+      "Threads": {
+        "used_as_default": true,
+        "build_flag": "-DKokkos_ENABLE_PTHREAD",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {},
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "OpenSSL": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "ENABLE_OPENSSL",
+        "build_flag": "-DENABLE_OPENSSL"
+      },
+      "Kokkos": {
+        "version": null,
+        "used_as_default": true,
+        "conditions": "Always",
+        "build_flag": "-DUSE_KOKKOS"
+      }
+    },
+    "compiler_flags": [
+      "${CMAKE_CXX17_STANDARD_COMPILE_OPTION}",
+      "${CMAKE_CXX_FLAGS_DEBUG}",
+      "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}",
+      "${CMAKE_CXX_FLAGS_RELEASE}"
+    ],
+    "optimization_build_flags": [
+      "-DVPIC_ENABLE_AUTO_TUNING",
+      "-DVPIC_ENABLE_HIERARCHICAL",
+      "-DVPIC_DISABLE_AUTOSETTINGS",
+      "-DVPIC_ENABLE_TEAM_REDUCTION",
+      "-DVPIC_ENABLE_VECTORIZATION",
+      "-DVPIC_ENABLE_ACCUMULATORS",
+      "-DDUMP_ENERGIES"
+    ],
+    "compilers": {
+      "CXX": {
+        "minimum_version": "3.9"
+      }
+    },
+    "architectures": [],
+    "simd_vectorization": {
+      "Altivec": {
+        "build_flag": "-DUSE_V4_ALTIVEC",
+        "default": false
+      },
+      "Portable": {
+        "build_flag": "-DUSE_V4_PORTABLE",
+        "default": false
+      },
+      "SSE": {
+        "build_flag": "-DUSE_V4_SSE",
+        "default": false
+      }
+    },
+    "build_system": {
+      "type": "cmake",
+      "minimum_version": "3.9"
+    },
+    "internal_build": {
+      "library_name": "Kokkos",
+      "build_flag": "-DBUILD_INTERNAL_KOKKOS"
+    }
+  }

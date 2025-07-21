@@ -1,0 +1,135 @@
+{
+    "gpu_build": {
+      "value": true,
+      "build_flag": null
+    },
+    "gpu_backends": {
+      "CUDA": {
+        "used_as_default": false,
+        "build_flag": "-DQE_ENABLE_CUDA",
+        "minimum_version": null
+      },
+      "OpenACC": {
+        "used_as_default": false,
+        "build_flag": "-DQE_ENABLE_OPENACC",
+        "minimum_version": null
+      }
+    },
+    "parallel_programming_libraries": {
+      "MPI": {
+        "used_as_default": true,
+        "build_flag": "-DQE_ENABLE_MPI",
+        "minimum_version": null
+      },
+      "OpenMP": {
+        "used_as_default": false,
+        "build_flag": "-DQE_ENABLE_OPENMP",
+        "minimum_version": null
+      },
+      "OpenMP_offload": {
+        "used_as_default": false,
+        "build_flag": "-DQE_ENABLE_OFFLOAD",
+        "minimum_version": null
+      }
+    },
+    "linear_algebra_libraries": {
+      "LAPACK": {
+        "used_as_default": false,
+        "build_flag": null,
+        "condition": "If QE_LAPACK_INTERNAL is OFF"
+      },
+      "Internal LAPACK": {
+        "used_as_default": true,
+        "build_flag": "-DQE_LAPACK_INTERNAL",
+        "condition": "If QE_LAPACK_INTERNAL is ON"
+      },
+      "SCALAPACK": {
+        "used_as_default": false,
+        "build_flag": "-DQE_ENABLE_SCALAPACK",
+        "condition": null
+      }
+    },
+    "FFT_libraries": {},
+    "other_external_libraries": {
+      "ELPA": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_ENABLE_ELPA is ON and QE_ENABLE_SCALAPACK is also ON",
+        "build_flag": "-DQE_ENABLE_ELPA"
+      },
+      "LIBXC": {
+        "version": "5.1.2",
+        "used_as_default": false,
+        "conditions": "QE_ENABLE_LIBXC is ON",
+        "build_flag": "-DQE_ENABLE_LIBXC"
+      },
+      "HDF5": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_ENABLE_HDF5 is ON",
+        "build_flag": "-DQE_ENABLE_HDF5"
+      },
+      "FoX": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_ENABLE_FOX is ON",
+        "build_flag": "-DQE_ENABLE_FOX"
+      },
+      "Wannier90": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_WANNIER90_INTERNAL is ON",
+        "build_flag": "-DQE_WANNIER90_INTERNAL"
+      },
+      "LibMBD": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_MBD_INTERNAL is ON",
+        "build_flag": "-DQE_MBD_INTERNAL"
+      },
+      "DeviceXlib": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_DEVICEXLIB_INTERNAL is ON",
+        "build_flag": "-DQE_DEVICEXLIB_INTERNAL"
+      },
+      "Environ": {
+        "version": null,
+        "used_as_default": false,
+        "conditions": "QE_ENABLE_ENVIRON is ON",
+        "build_flag": "-DQE_ENABLE_ENVIRON"
+      }
+    },
+    "compiler_flags": [],
+    "optimization_build_flags": [],
+    "compilers": {
+      "GNU": {
+        "minimum_version": null
+      },
+      "PGI": {
+        "minimum_version": null
+      },
+      "NVHPC": {
+        "minimum_version": null
+      },
+      "Cray": {
+        "minimum_version": null
+      },
+      "Intel": {
+        "minimum_version": null
+      },
+      "XL": {
+        "minimum_version": null
+      }
+    },
+    "architectures": [],
+    "simd_vectorization": {},
+    "build_system": {
+      "type": "cmake",
+      "minimum_version": "3.20"
+    },
+    "internal_build": {
+      "library_name": "LAPACK",
+      "build_flag": "-DQE_LAPACK_INTERNAL"
+    }
+  }
