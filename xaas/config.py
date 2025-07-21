@@ -163,6 +163,7 @@ class DeployConfig(DataClassYAMLMixin):
     features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
     features_select: dict[str, str]
+    docker_repository: str
     # FIXME: hide this config in image config
     # should be selected by features automatically
     layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)

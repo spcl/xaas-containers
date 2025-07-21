@@ -35,7 +35,7 @@ class Deployment(Action):
         logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
         image_name = config.ir_image.removesuffix("-ir")
-        image_name = f"{XaaSConfig().docker_repository}:{image_name}-deploy-{name}"
+        image_name = f"{config.docker_repository}:{image_name}-deploy-{name}"
 
         self.docker_runner.build(dockerfile="Dockerfile", path=dockerfile_path, tag=image_name)
 
