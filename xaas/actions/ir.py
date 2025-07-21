@@ -304,14 +304,15 @@ class IRCompiler(Action):
                     logging.error(f"Failed to build IR {target} for other project")
                     errors += 1
 
-        if errors > 0:
-            logging.error(f"Failed to build {errors} IR files")
-
         for container in containers.values():
             container.stop(timeout=0)
 
         config_path = os.path.join(config.build.working_directory, "ir_compilation.yml")
         config.save(config_path)
+
+        if errors > 0:
+            logging.error(f"Failed to build {errors} IR files")
+            raise RuntimeError(f"Failed to build {errors} IR files")
 
         # Print summary
         # self.print_summary(config)
