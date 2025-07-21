@@ -34,7 +34,7 @@ class Deployment(Action):
             f.write(dockerfile_content)
         logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
-        image_name = config.ir_image.removesuffix("-ir")
+        image_name = config.ir_image.split(":")[1].removesuffix("-ir")
         image_name = f"{config.docker_repository}:{image_name}-deploy-{name}"
 
         self.docker_runner.build(dockerfile="Dockerfile", path=dockerfile_path, tag=image_name)
@@ -106,7 +106,7 @@ class Deployment(Action):
                 f"COPY --link --from={name}-layer {layer_runtime_location} {layer_runtime_location}"
             )
 
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{config.ir_image} as builder")
+        lines.append(f"FROM {config.ir_image} as builder")
         lines.extend(copies)
         lines.extend(
             [
