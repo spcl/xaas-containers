@@ -1,4 +1,6 @@
 FROM spcleth/xaas:llvm-19 as builder
+ARG SIMD_FLAG
+ENV SIMD_FLAG=${SIMD_FLAG}
 
 WORKDIR /tmp
 
@@ -7,7 +9,7 @@ USER root
 RUN wget https://fftw.org/fftw-3.3.10.tar.gz \
     && tar -xf fftw-3.3.10.tar.gz \
     && cd fftw-3.3.10 \
-    && CFLAGS="-fPIC" ./configure --enable-float --enable-threads --prefix=/opt/fftw3 \
+    && CFLAGS="-fPIC" ./configure --enable-float --enable-threads ${SIMD_FLAG} --prefix=/opt/fftw3 \
     && make V=1 -j8 && make install
 
 FROM ubuntu:22.04

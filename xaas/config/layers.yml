@@ -1,11 +1,32 @@
 layers:
   MPI:
+    dockerfile: Dockerfile.mpich
+    version: 4.3.0
     name: mpich
     build_location: /opt/mpich
     runtime_location: /opt/mpich
+  CUDA:
+    dockerfile: Dockerfile.cuda
+    name: cuda-${version}
+    version: 12.8
+    build_location: /usr/local/cuda-${version}
+    runtime_location: /usr/local/cuda-${version}
 layers_deps:
   fftw3:
-    name: deps-fftw3
+    dockerfile: deps/Dockerfile.fftw
+    name: deps-fftw3-${version}-${SIMD_FLAG}
+    version: 3.3.10
+    arg_mapping:
+      VECTORIZATION:
+        flag_name: SIMD_FLAG
+        build_args:
+          SSE2: --enable-sse2
+          SSE4.1: --enable-sse2
+          AVX_256: --enable-sse2 --enable-avx --enable-avx2
+          AVX2_128: --enable-sse2 --enable-avx --enable-avx2
+          AVX2_256: --enable-sse2 --enable-avx --enable-avx2
+          AVX_512: --enable-sse2 --enable-avx --enable-avx2 --enable-avx512
+
     build_location: /opt/fftw3
     runtime_location: /opt/fftw3
     envs:

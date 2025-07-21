@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
@@ -20,6 +21,7 @@ class DivergenceReason(Enum):
     INCLUDES = "includes"
     DEFINITIONS = "definitions"
     OPTIMIZATIONS = "optimizations"
+    CPU_TUNING = "cpu-tuning"
     OTHERS = "other"
 
     def __str__(self):
@@ -34,6 +36,7 @@ class CompileCommand(DataClassYAMLMixin):
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
     optimizations: set = field(default_factory=set)
+    cpu_tuning: set = field(default_factory=set)
     definitions: set = field(default_factory=set)
     others: set = field(default_factory=set)
 
@@ -51,6 +54,8 @@ class SourceFileStatus(DataClassYAMLMixin):
     default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
+
+    # cpu_tuning: dict[str, set[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -224,6 +229,21 @@ class BuildAnalyzer(Action):
                 "added": includes_diff1,
                 "removed": includes_diff2,
             }
+        # FIXME: added/removed is not the best match here
+        # if we point to different build directories,
+        # these could include different configs!
+        added = []
+        for incl in [*cmd1.includes, *cmd2.includes]:
+            if "/build" in incl:
+                added.append(incl)
+        if len(added) > 0:
+            if DivergenceReason.INCLUDES in differences:
+                differences[DivergenceReason.INCLUDES]["added"].update(added)
+            else:
+                differences[DivergenceReason.INCLUDES] = {
+                    "added": added,
+                    "removed": [],
+                }
 
         defines_diff1 = cmd2.definitions - cmd1.definitions
         defines_diff2 = cmd1.definitions - cmd2.definitions
@@ -237,6 +257,14 @@ class BuildAnalyzer(Action):
         opts_diff2 = cmd1.optimizations - cmd2.optimizations
         if opts_diff1 or opts_diff2:
             differences[DivergenceReason.OPTIMIZATIONS] = {
+                "added": opts_diff1,
+                "removed": opts_diff2,
+            }
+
+        opts_diff1 = cmd2.cpu_tuning - cmd1.cpu_tuning
+        opts_diff2 = cmd1.cpu_tuning - cmd2.cpu_tuning
+        if opts_diff1 or opts_diff2:
+            differences[DivergenceReason.CPU_TUNING] = {
                 "added": opts_diff1,
                 "removed": opts_diff2,
             }
@@ -304,6 +332,10 @@ class BuildAnalyzer(Action):
             elif elem == "-o":
                 i += 2
                 continue
+            # We catch everything like `-m<...>`
+            # this might also catch some other Clang options
+            elif re.match(r"-m(?:tune=|arch=|)(\w+)", elem):
+                result.cpu_tuning.add(elem)
             # Handle other flags starting with -f
             # ignore warnings
             elif elem.startswith("-f"):

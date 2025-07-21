@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -21,10 +22,19 @@ class BuildSystem(Enum):
 
 
 @dataclass
+class DockerLayerVersion(DataClassYAMLMixin):
+    flag_name: str
+    build_args: dict[str, str]
+
+
+@dataclass
 class DockerLayer(DataClassYAMLMixin):
+    dockerfile: str
     name: str
+    version: str
     build_location: str
     runtime_location: str
+    arg_mapping: dict[str, DockerLayerVersion] | None = None
 
 
 @dataclass
@@ -104,8 +114,15 @@ class FeatureSelectionType(Enum):
 @dataclass
 class BuildResult(DataClassYAMLMixin):
     directory: str
+    docker_image: str
     features_boolean: list[FeatureType]
     features_select: dict[FeatureSelectionType, str] = field(default_factory=dict)
+
+
+@dataclass
+class LayerDepConfig(DataClassYAMLMixin):
+    version: str
+    arg_mapping: dict[str, str]
 
 
 @dataclass
@@ -115,10 +132,10 @@ class RunConfig(DataClassYAMLMixin):
     build_system: BuildSystem
     source_directory: str
     features_boolean: dict[FeatureType, tuple[str, str]]
-    features_select: dict[FeatureSelectionType, dict[str, str]]
+    features_select: dict[str, dict[str, str]]
     additional_args: list[str]
     additional_steps: list[str]
-    layers_deps: list[str] = field(default_factory=list)
+    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
     @staticmethod
     def load(config_path: str) -> RunConfig:
@@ -134,15 +151,22 @@ class RunConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        return cls(**asdict(instance))
+        obj = cls(**asdict(instance))
+        obj.layers_deps = copy.deepcopy(instance.layers_deps)
+        return obj
 
 
 @dataclass
 class DeployConfig(DataClassYAMLMixin):
     ir_image: str
     working_directory: str
+    features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
-    features_select: dict[FeatureSelectionType, str]
+    features_select: dict[str, str]
+    docker_repository: str
+    # FIXME: hide this config in image config
+    # should be selected by features automatically
+    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
     @staticmethod
     def load(config_path: str) -> DeployConfig:

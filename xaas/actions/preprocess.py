@@ -36,10 +36,13 @@ class IRFileStatus(DataClassYAMLMixin):
 
 @dataclass
 class FileStatus(DataClassYAMLMixin):
-    # command: CompileCommand
+    command: CompileCommand
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
+    # cpu_tuning: set[str] = field(default_factory=set)
+    # cpu_tuning: dict[str, set[str]] = field(default_factory=dict)
+    cpu_tuning: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -87,7 +90,7 @@ class ClangPreprocesser(Action):
 
         self.parallel_workers = parallel_workers
         self.openmp_check = openmp_check
-        self.CLANG_PATH = "/usr/bin/clang++-19"
+        self.CLANG_PATH = "/usr/bin/clang++"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
 
     def print_summary(self, config: PreprocessingResult) -> None:
@@ -98,8 +101,13 @@ class ClangPreprocesser(Action):
         difference_identical_hash = defaultdict(set)
         identical_hash_different_flags = set()
         identical_after_processing = set()
+
+        appears_only_once = set()
         for target, status in config.targets.items():
             hash_val = status.projects[status.baseline_project].hash
+
+            if len(status.projects.items()) == 1:
+                appears_only_once.add(target)
 
             for project_name, project_status in status.projects.items():
                 if project_name == status.baseline_project:
@@ -122,6 +130,7 @@ class ClangPreprocesser(Action):
                         differences[key].add(target)
                         different_files.add(target)
 
+        logging.info(f"Appear only once: {len(appears_only_once)}")
         logging.info(f"Different files: {len(different_files)}")
         for key, value in differences.items():
             logging.info(f"\tDifference: {key}, count: {len(value)}")
@@ -160,7 +169,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=config.build.docker_image,
+                        image=build.docker_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,
@@ -193,23 +202,35 @@ class ClangPreprocesser(Action):
                                 baseline_command=status.default_command,
                             )
                             process_result.projects[status.default_build] = FileStatus(
-                                ProjectDivergence()
+                                status.default_command,
+                                ProjectDivergence(),
                             )
 
-                            if len(status.divergent_projects) == 0:
+                            # FIXME: we should remove divergent projects earlier
+                            is_divergent = len(status.divergent_projects) > 0
+                            if is_divergent:
+                                is_divergent = False
+                                for project in status.divergent_projects.values():
+                                    if len(project.reasons) > 0:
+                                        is_divergent = True
+                                        break
+
+                            if not is_divergent:
                                 """
                                     This file is identical across all builds - we can skip it.
                                     But we need to note that all projects using it should include it.
                                 """
                                 for project in status.present_in_projects:
+                                    cmd = config.build_comparison.project_results[project].files[
+                                        target
+                                    ]
                                     process_result.projects[project] = FileStatus(
-                                        ProjectDivergence()
+                                        cmd, ProjectDivergence()
                                     )
                                     process_result.projects[project].hash = "IDENTICAL"
+
                                 new_results.targets[target] = process_result
                                 continue
-
-                            # FIXME: disable building of MPI files
 
                             cmd = config.build_comparison.project_results[
                                 status.default_build
@@ -228,7 +249,7 @@ class ClangPreprocesser(Action):
                             for name, div_status in status.divergent_projects.items():
                                 cmd = config.build_comparison.project_results[name].files[target]
 
-                                process_result.projects[name] = FileStatus(div_status)
+                                process_result.projects[name] = FileStatus(cmd, div_status)
                                 futures.append(
                                     executor.submit(
                                         self._preprocess_file,
@@ -249,7 +270,16 @@ class ClangPreprocesser(Action):
 
                         result_iter = iter(results)
                         for target, status in slice_projects:
-                            if len(status.divergent_projects) == 0:
+                            # FIXME: we should remove divergent projects earlier
+                            is_divergent = len(status.divergent_projects) > 0
+                            if is_divergent:
+                                is_divergent = False
+                                for project in status.divergent_projects.values():
+                                    if len(project.reasons) > 0:
+                                        is_divergent = True
+                                        break
+
+                            if not is_divergent:
                                 logging.debug(f"Skipping {target}, no differences found")
                                 continue
 

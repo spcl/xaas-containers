@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 import click
 
@@ -12,10 +13,12 @@ from xaas.actions.container import DockerImageBuilder
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
 from xaas.actions.build import Config as BuildConfig
+from xaas.actions.cpu_tuning import CPUTuning
 from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import DeployConfig, RunConfig
 from xaas.config import XaaSConfig
+from xaas.actions.docker import Runner as DockerRunner
 
 
 def initialize():
@@ -74,6 +77,7 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
 
     config_obj = AnalyzerConfig.load(
         os.path.join(run_config.working_directory, "build_analyze.yml")
+        # os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
     action = ClangPreprocesser(parallel_workers, openmp_check)
     action.validate(config_obj)
@@ -94,6 +98,40 @@ def preprocess_summary(config) -> None:
     action.print_summary(config_obj)
 
 
+@cli.group("cpu-tuning")
+def cpu_tuning():
+    pass
+
+
+@cpu_tuning.command("run")
+@click.argument("config", type=click.Path(exists=True))
+def cpu_tuning_run(config) -> None:
+    initialize()
+
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "preprocess.yml")
+    )
+    action = CPUTuning()
+    action.validate(config_obj)
+    action.execute(config_obj)
+
+
+@cpu_tuning.command("summary")
+@click.argument("config", type=click.Path(exists=True))
+def cpu_tuning_summary(config) -> None:
+    initialize()
+
+    run_config = RunConfig.load(config)
+
+    config_obj = PreprocessingResult.load(
+        os.path.join(run_config.working_directory, "cpu_tuning.yml")
+    )
+    action = ClangPreprocesser(1, False)
+    action.print_summary(config_obj)
+
+
 @cli.group()
 def ir():
     pass
@@ -109,7 +147,7 @@ def ir_compiler_run(config, parallel_workers, build_project) -> None:
     run_config = RunConfig.load(config)
 
     config_obj = PreprocessingResult.load(
-        os.path.join(run_config.working_directory, "preprocess.yml")
+        os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
     action = IRCompiler(parallel_workers, build_project)
     action.validate(config_obj)
@@ -132,7 +170,8 @@ def ir_compiler_run_summary(config) -> None:
 
 @cli.command()
 @click.argument("config", type=click.Path(exists=True))
-def container(config) -> None:
+@click.option("--docker-repository", type=str, default="spcleth:xaas", help="Docker repository")
+def container(config, docker_repository) -> None:
     initialize()
 
     run_config = RunConfig.load(config)
@@ -140,7 +179,7 @@ def container(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "ir_compilation.yml")
     )
-    action = DockerImageBuilder()
+    action = DockerImageBuilder(docker_repository=docker_repository)
     action.validate(config_obj)
     action.execute(config_obj)
 
@@ -155,6 +194,43 @@ def deploy(config, parallel_workers) -> None:
     action = Deployment(parallel_workers)
     action.validate(config_obj)
     action.execute(config_obj)
+
+
+@cli.command("build-deps")
+@click.argument("dep_name", type=str)
+def build_deps(dep_name: str) -> None:
+    initialize()
+
+    DOCKERFILES_DIR = os.path.join(Path(__file__).parent.parent, "dockerfiles")
+
+    if dep_name not in XaaSConfig().layers.layers_deps:
+        raise ValueError(f"Dependency {dep_name} not found in configuration.")
+
+    dep_config = XaaSConfig().layers.layers_deps[dep_name]
+    print(dep_config)
+
+    docker_runner = DockerRunner(XaaSConfig().docker_repository)
+
+    if dep_config.arg_mapping:
+        for _, flag_config in dep_config.arg_mapping.items():
+            for flag_value, build_arg in flag_config.build_args.items():
+                name = dep_config.name.replace("${version}", dep_config.version)
+                print(name, flag_config.flag_name, flag_value)
+                name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+
+                build_args = {flag_config.flag_name: build_arg}
+
+                print(name, build_args)
+
+                dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+                print(
+                    docker_runner.build(
+                        dockerfile=dockerfile,
+                        path=os.path.curdir,
+                        tag=f"{XaaSConfig().docker_repository}:{name}",
+                        build_args=build_args,
+                    )
+                )
 
 
 def main() -> None:

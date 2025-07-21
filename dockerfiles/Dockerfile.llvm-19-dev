@@ -1,0 +1,68 @@
+FROM ubuntu:22.04 as builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    wget \
+    git \
+    curl \
+    gnupg \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    lsb-release \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-dev \
+    unzip \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-linux-x86_64.sh \
+    && chmod +x cmake-3.28.1-linux-x86_64.sh \
+    && ./cmake-3.28.1-linux-x86_64.sh --skip-license --prefix=/usr/local \
+    && rm cmake-3.28.1-linux-x86_64.sh
+
+ARG LLVM_VERSION=19.1.7
+
+WORKDIR /tmp
+
+RUN wget https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz && \
+    tar xf llvm-project-${LLVM_VERSION}.src.tar.xz && \
+    mv llvm-project-${LLVM_VERSION}.src llvm-src
+
+WORKDIR /tmp/llvm-build
+
+RUN cmake \
+    -DLLVM_ENABLE_PROJECTS="llvm;clang;openmp" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/opt/llvm \
+    -DBUILD_SHARED_LIBS=ON \
+    ../llvm-src/llvm
+
+RUN make -j16 && make install
+
+FROM ubuntu:22.04
+
+COPY --from=builder /opt/llvm /opt/llvm
+
+RUN apt-get update && apt-get install -y \
+    wget build-essential git
+
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.28.1/cmake-3.28.1-linux-x86_64.sh \
+    && chmod +x cmake-3.28.1-linux-x86_64.sh \
+    && ./cmake-3.28.1-linux-x86_64.sh --skip-license --prefix=/usr/local \
+    && rm cmake-3.28.1-linux-x86_64.sh
+
+ENV FC=/opt/llvm/bin/flang-new-19
+
+ENV LD_LIBRARY_PATH=/opt/llvm/lib/x86_64-unknown-linux-gnu:${LD_LIBRARY_PATH}
+
+RUN update-alternatives --remove-all cc && update-alternatives --remove-all c++ \
+    && update-alternatives --install /usr/bin/cc cc /opt/llvm/bin/clang 100 \
+    && update-alternatives --install /usr/bin/c++ c++ /opt/llvm/bin/clang++ 100 \
+    && update-alternatives --install /usr/bin/clang clang /opt/llvm/bin/clang 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /opt/llvm/bin/clang++ 100
+

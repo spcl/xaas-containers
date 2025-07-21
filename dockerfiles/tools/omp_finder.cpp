@@ -6,6 +6,7 @@
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
+#include <iostream>
 
 using namespace clang;
 using namespace clang::tooling;
@@ -26,7 +27,8 @@ int main(int argc, const char **argv) {
   llvm::cl::OptionCategory Category("omp-finder");
   auto ExpectedParser = CommonOptionsParser::create(argc, argv, Category);
   if (!ExpectedParser) {
-    llvm::errs() << ExpectedParser.takeError();
+    std::cerr << "error!" << std::endl;
+    // ExpectedParser.takeError().asString() << "\n";
     return 1;
   }
   CommonOptionsParser &OptionsParser = ExpectedParser.get();
@@ -45,7 +47,7 @@ int main(int argc, const char **argv) {
 
   Tool.run(newFrontendActionFactory(&Finder).get());
 
-  llvm::outs() << (Detector.isFound() ? "XAAS_OMP_FOUND" : "XAAS_OMP_NOTFOUND");
+  std::cout << (Detector.isFound() ? "XAAS_OMP_FOUND" : "XAAS_OMP_NOTFOUND");
 
   return 0;
 }

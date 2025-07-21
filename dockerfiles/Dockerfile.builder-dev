@@ -1,18 +1,17 @@
 ARG CUDA_VERSION=12.8
 FROM spcleth/xaas:mpich as mpich
 FROM spcleth/xaas:cuda-${CUDA_VERSION} as cuda
-FROM spcleth/xaas:omp-finder as omp-finder
+FROM spcleth/xaas:omp-finder-dev as omp-finder
+FROM spcleth/xaas:features-analyzer-dev as features-analyzer
 
-FROM spcleth/xaas:llvm-19
+FROM spcleth/xaas:llvm-19-dev
 ARG CUDA_VERSION
 
 COPY --from=mpich /opt/mpich /opt/mpich
 COPY --from=cuda /usr/local/cuda-${CUDA_VERSION} /usr/local/cuda-${CUDA_VERSION}
+COPY --from=features-analyzer /tools /tools
 COPY --from=omp-finder /tools /tools
 
-#USER root
-
-RUN pip install tqdm
 
 ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda-${CUDA_VERSION}/lib64:${LD_LIBRARY_PATH}

@@ -1,0 +1,23 @@
+FROM spcleth/xaas:llvm-19-dev as dev
+FROM ubuntu:22.04
+
+COPY --from=dev /opt/llvm/lib/x86_64-unknown-linux-gnu/ /usr/lib/
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    wget \
+    parallel \
+    && rm -rf /var/lib/apt/lists/*
+
+#RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+#    && add-apt-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" \
+#    && apt-get update \
+#    && apt-get install -y \
+#    libomp5-19 \
+#    && rm -rf /var/lib/apt/lists/*
+
