@@ -138,7 +138,6 @@ class CPUTuning(Action):
                 baseline_flags: set[str] = status.baseline_command.cpu_tuning
 
                 cmd = status.baseline_command
-                # baseline_projectbaseline_projectprojects[status.baseline_project].files[target]
                 self.get_flags(
                     config,
                     containers[status.baseline_project].container,
@@ -148,29 +147,27 @@ class CPUTuning(Action):
                     containers[status.baseline_project].working_dir,
                 )
 
-                # FIXME: dirty and simpliistic implementation
-                # in the long run, we need to detect groups like in the OMP impl
-                # merge with the OMP implementation - similar logic
-                files_divergent = 0
-                for project_name, project_status in status.projects.items():
-                    if DivergenceReason.CPU_TUNING in project_status.cmd_differences.reasons:
-                        for (
-                            nested_project_name,
-                            nested_project_status,
-                        ) in status.projects.items():
-                            if project_name == nested_project_name:
-                                continue
+                ## FIXME: handle groups of the same hash
+                # Curently, we only handle identical hashes against baseline projet.
+                # If there was a case that there is a non-baseline identical hash shared by different IRs, then we will
+                # fail to extract CPU tuning flags for them.
 
-                            if project_status.hash == nested_project_status.hash:
-                                files_divergent += 1
-
-                # FIXME: this is a hck to not process files with differnet hash
-                # needs proper invesigation
-                if files_divergent == 0:
-                    continue
+                simplify_baseline = False
 
                 for project_name, project_status in status.projects.items():
                     if DivergenceReason.COMPILER in project_status.cmd_differences.reasons:
+                        continue
+
+                    if project_name == status.baseline_project:
+                        continue
+
+                    """
+                        This simplification only makes sense if:
+                        - Hash is the same, thus they are not affected by different architecture (intrinsics, etc.).
+                        - There is a difference in flags.
+                    """
+
+                    if project_status.hash != status.projects[status.baseline_project].hash:
                         continue
 
                     if DivergenceReason.CPU_TUNING in project_status.cmd_differences.reasons:
@@ -187,14 +184,6 @@ class CPUTuning(Action):
                                 ]
                             )
                         )
-                        self.get_flags(
-                            config,
-                            containers[status.baseline_project].container,
-                            baseline_flags,
-                            target,
-                            cmd,
-                            containers[status.baseline_project].working_dir,
-                        )
                         divergent_cmd = project_status.command
                         self.get_flags(
                             config,
@@ -204,20 +193,36 @@ class CPUTuning(Action):
                             divergent_cmd,
                             containers[project_name].working_dir,
                         )
-                        status.projects[status.baseline_project].cpu_tuning = baseline_flags
                         project_status.cpu_tuning = new_flags
+                        simplify_baseline = True
 
-                        logging.debug(f"[{self.name}] Simplify file {target}")
-                        del project_status.cmd_differences.reasons[DivergenceReason.CPU_TUNING]
+                        if project_status.hash == status.projects[status.baseline_project].hash:
+                            logging.debug(f"[{self.name}] Simplify file {target}")
+                            del project_status.cmd_differences.reasons[DivergenceReason.CPU_TUNING]
 
                         # sanity check
-                        for flags in [baseline_flags, new_flags]:
-                            for elem in flags:
-                                if (
-                                    not re.match(r"-m(?:tune=|arch=|)(\w+)", elem)
-                                    and elem not in self.SUPPORTED_FLAGS
-                                ):
-                                    raise RuntimeError(f"Unknown flag: {elem} in {flags}!")
+                        for elem in new_flags:
+                            if (
+                                not re.match(r"-m(?:tune=|arch=|)(\w+)", elem)
+                                and elem not in self.SUPPORTED_FLAGS
+                            ):
+                                raise RuntimeError(f"Unknown flag: {elem} in {new_flags}!")
+                    else:
+                        """
+                            If CPU tuning flags are the same as baseline project,
+                            then we just copy it over.
+                        """
+                        project_status.cpu_tuning = baseline_flags
+
+                if simplify_baseline:
+                    status.projects[status.baseline_project].cpu_tuning = baseline_flags
+                    # sanity check
+                    for elem in baseline_flags:
+                        if (
+                            not re.match(r"-m(?:tune=|arch=|)(\w+)", elem)
+                            and elem not in self.SUPPORTED_FLAGS
+                        ):
+                            raise RuntimeError(f"Unknown flag: {elem} in {baseline_flags}!")
 
         finally:
             for container in containers.values():
