@@ -4,15 +4,24 @@ import json
 import logging
 import os
 import re
+import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
+from typing import Annotated
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+from mashumaro.types import Discriminator
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
+
+
+class Compiler(str, Enum):
+    CLANG = "clang"
+    NVCC = "nvcc"
+    ICPX = "icpx"
 
 
 class DivergenceReason(Enum):
@@ -42,6 +51,21 @@ class CompileCommand(DataClassYAMLMixin):
 
 
 @dataclass
+class ClangCompileCommand(CompileCommand):
+    compiler_type: Compiler = Compiler.CLANG
+
+
+@dataclass
+class NVCCCompileCommand(CompileCommand):
+    compiler_type: Compiler = Compiler.NVCC
+    ccbin: str | None = None
+    gencode_ptx: set = field(default_factory=set)
+    gencode_sass: set = field(default_factory=set)
+    # CUDA specific file - list of options
+    response_files: set = field(default_factory=set)
+
+
+@dataclass
 class ProjectDivergence(DataClassYAMLMixin):
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
 
@@ -51,7 +75,10 @@ class SourceFileStatus(DataClassYAMLMixin):
     """Status of a source file across all projects."""
 
     default_build: str
-    default_command: CompileCommand
+    default_command: Annotated[
+        CompileCommand | NVCCCompileCommand,
+        Discriminator(field="compiler_type", include_subtypes=True),
+    ]
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
 
@@ -62,7 +89,14 @@ class SourceFileStatus(DataClassYAMLMixin):
 class ProjectResult(DataClassYAMLMixin):
     """Results from analyzing a single project build."""
 
-    files: dict[str, CompileCommand] = field(default_factory=dict)  # Target file -> compile command
+    # Target file -> compile command
+    files: dict[
+        str,
+        Annotated[
+            CompileCommand | NVCCCompileCommand,
+            Discriminator(field="compiler_type", include_subtypes=True),
+        ],
+    ] = field(default_factory=dict)
 
 
 @dataclass
@@ -297,12 +331,21 @@ class BuildAnalyzer(Action):
         if not elems:
             return None
 
-        result = CompileCommand(source, build_dir, elems[0])
+        if os.path.basename(elems[0]) in ["clang++", "clang", "cc", "c++"]:
+            result = ClangCompileCommand(source, build_dir, elems[0])
+        elif os.path.basename(elems[0]) == "nvcc":
+            result = NVCCCompileCommand(source, build_dir, elems[0])
+        elif os.path.basename(elems[0]) == "icpx":
+            # compiler_type = Compiler.ICPX
+            raise NotImplementedError()
+        else:
+            raise RuntimeError(f"Unknown compiler type {elems[0]}")
 
-        i = 1
+        i = 1  # Skip compiler name
         while i < len(elems):
             elem = elems[i]
 
+            handled = True
             # Handle preprocessor definitions
             if elem.startswith("-D"):
                 result.definitions.add(elem)
@@ -344,11 +387,140 @@ class BuildAnalyzer(Action):
             elif elem.startswith("-W"):
                 i += 1
                 continue
+            else:
+                handled = False
+
+            if not handled and isinstance(result, NVCCCompileCommand):
+                i, handled = BuildAnalyzer._handle_nvcc_specific(i, elems, result, build_dir)
+
             # Other arguments
             # catch some outliers
             # ignore source and target files
-            elif elem not in ["-c", source, target]:
+            if not handled and elem not in ["-c", source, target]:
                 result.others.add(elem)
 
             i += 1
         return result
+
+    @staticmethod
+    def _handle_nvcc_specific(
+        pos: int, options: list[str], result: NVCCCompileCommand, build_dir: str
+    ) -> tuple[int, bool]:
+        """
+        Handle NVCC specific options like --options-file, ccbin, --generate-code, and -x cu.
+        """
+        elem = options[pos]
+
+        """
+            Some options like gencode are quoted.
+            We need to strip quotes to handle them correctly.
+        """
+        elem = elem.strip('"').strip("'").rstrip("'").rstrip('"')
+
+        """
+            Cmake will generate response files for includes, libraries, and objects.
+        """
+        if elem.startswith("--options-file="):
+            options_file_path = elem.split("=", 1)[1]
+            result.response_files.add(options_file_path)
+            return pos, True
+        elif elem == "--options-file":
+            if pos + 1 < len(options):
+                pos += 1
+                result.response_files.add(os.path.join(build_dir, options[pos]))
+                return pos, True
+            else:
+                logging.error("--options-file flag found but no path provided")
+                return pos, True
+
+        elif elem.startswith("--compiler-bindir=") or elem.startswith("-ccbin="):
+            """
+                Handle ccbin (CUDA compiler host compiler).
+                It should always point to our Clang when configuration is correct.
+            """
+            ccbin_path = elem.split("=", 1)[1]
+            result.ccbin = ccbin_path
+            return pos, True
+        elif elem in ["--compiler-bindir", "-ccbin"]:
+            if pos + 1 < len(options):
+                pos += 1
+                result.ccbin = options[pos]
+                return pos, True
+            else:
+                logging.error(f"{elem} flag found but no path provided")
+                return pos, True
+
+        elif elem.startswith("--generate-code=") or elem.startswith("-gencode="):
+            gencode_spec = elem.split("=", 1)[1]
+            BuildAnalyzer._parse_gencode_spec(gencode_spec, result)
+            return pos, True
+        elif elem in ["--generate-code", "-gencode"]:
+            if pos + 1 < len(options):
+                pos += 1
+                gencode_spec = options[pos]
+                BuildAnalyzer._parse_gencode_spec(gencode_spec, result)
+                return pos, True
+            else:
+                logging.error("--generate-code flag found but no specification provided")
+                return pos, True
+
+        elif elem == "-x":
+            """
+                Handle -x cu; input file type is CUDA.
+            """
+            if pos + 1 < len(options) and options[pos + 1] == "cu":
+                pos += 1
+                result.others.add("-x cu")
+                return pos, True
+
+        return pos, False
+
+    @staticmethod
+    def _parse_gencode_spec(gencode_spec: str, result: NVCCCompileCommand) -> None:
+        """
+        Parse a gencode specification and add to appropriate gencode sets.
+        Examples:
+        - "arch=compute_70,code=sm_70" -> SASS 70
+        - "arch=compute_75,code=compute_75" -> PTX 75
+        - "arch=compute_80,code=[sm_80,compute_80]" -> SASS 80 & PTX 80
+        """
+        import re
+
+        arch_match = re.search(r"arch=compute_(\d+)", gencode_spec)
+        if not arch_match:
+            logging.error(f"Could not parse architecture from gencode spec: {gencode_spec}")
+            return
+
+        """
+            Now etract code targets - this distinguishes SASS and PTX targets.
+        """
+        code_match = re.search(r"code=(.+)", gencode_spec)
+        if not code_match:
+            logging.error(f"Could not parse code targets from gencode spec: {gencode_spec}")
+            return
+
+        code_part = code_match.group(1)
+
+        if code_part.startswith("[") and code_part.endswith("]"):
+            """
+                Handle bracket notation: [sm_70,compute_70]
+            """
+            targets = code_part[1:-1].split(",")
+        else:
+            """
+                Handle single bracket: sm_70
+            """
+            targets = [code_part]
+
+        for target in targets:
+            target = target.strip()
+            if target.startswith("sm_"):
+                # SASS (binary) code
+                version = target[3:]
+                result.gencode_sass.add(version)
+            elif target.startswith("compute_"):
+                # PTX code
+                version = target[8:]
+                result.gencode_ptx.add(version)
+            else:
+                raise RuntimeError(f"Unknown code target format: {target}")
