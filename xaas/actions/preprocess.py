@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import cast
+from typing import cast, Annotated
 from collections import defaultdict, namedtuple
 from itertools import islice
 from enum import Enum
@@ -14,12 +14,14 @@ from dataclasses import dataclass, field
 import tqdm
 from docker.models.containers import Container
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+from mashumaro.types import Discriminator
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.analyze import (
     Compiler,
     CompileCommand,
+    ClangCompileCommand,
     NVCCCompileCommand,
     Config as AnalyzerConfig,
     DivergenceReason,
@@ -39,7 +41,10 @@ class IRFileStatus(DataClassYAMLMixin):
 
 @dataclass
 class FileStatus(DataClassYAMLMixin):
-    command: CompileCommand
+    command: Annotated[
+        CompileCommand,
+        Discriminator(field="compiler_type", include_subtypes=True),
+    ]
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
@@ -51,7 +56,10 @@ class FileStatus(DataClassYAMLMixin):
 @dataclass
 class ProcessedResults(DataClassYAMLMixin):
     baseline_project: str
-    baseline_command: CompileCommand
+    baseline_command: Annotated[
+        CompileCommand,
+        Discriminator(field="compiler_type", include_subtypes=True),
+    ]
     # Mapping: hash -> list of [(config, path)]
     # We use to decide when two file with the same hash are compatible with each other
     ir_files: dict[str, list[tuple[ProjectDivergence, IRFileStatus]]] = field(default_factory=dict)
