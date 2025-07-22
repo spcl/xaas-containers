@@ -42,6 +42,7 @@ class CompileCommand(DataClassYAMLMixin):
     source: str
     build_dir: str
     compiler: str
+    compiler_type: Compiler
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
     optimizations: set = field(default_factory=set)
@@ -76,7 +77,7 @@ class SourceFileStatus(DataClassYAMLMixin):
 
     default_build: str
     default_command: Annotated[
-        CompileCommand | NVCCCompileCommand,
+        CompileCommand,
         Discriminator(field="compiler_type", include_subtypes=True),
     ]
     present_in_projects: set[str] = field(default_factory=set)
@@ -93,7 +94,7 @@ class ProjectResult(DataClassYAMLMixin):
     files: dict[
         str,
         Annotated[
-            CompileCommand | NVCCCompileCommand,
+            CompileCommand,
             Discriminator(field="compiler_type", include_subtypes=True),
         ],
     ] = field(default_factory=dict)
