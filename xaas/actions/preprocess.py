@@ -94,7 +94,7 @@ def contains_openmp_flag(flags) -> bool:
 
 
 class ClangPreprocesser(Action):
-    def __init__(self, parallel_workers: int, openmp_check: bool):
+    def __init__(self, parallel_workers: int, openmp_check: bool, dry_run: bool):
         super().__init__(
             name="clangpreproceser", description="Apply Clang preprocessing to detect differences."
         )
@@ -103,6 +103,7 @@ class ClangPreprocesser(Action):
         self.openmp_check = openmp_check
         self.CLANG_PATH = "/usr/bin/clang++"
         self.OMP_TOOL_PATH = "/tools/openmp-finder/omp-finder"
+        self.dry_run = dry_run
 
     def print_summary(self, config: PreprocessingResult) -> None:
         logging.info(f"Total files: {len(config.targets)}")
@@ -387,12 +388,17 @@ class ClangPreprocesser(Action):
         # We need to redirect this as a shell command
         cmd = ["/bin/bash", "-c", " ".join(preprocess_cmd)]
 
-        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
-
-        if code != 0:
-            logging.error(f"Error preprocessing {target}: {output}")
-            logging.error(f"Command {cmd}")
-            return None
+        if not self.dry_run:
+            code, output = self.docker_runner.exec_run(container, cmd, working_dir)
+            if code != 0:
+                logging.error(f"Error preprocessing {target}: {output}")
+                logging.error(f"Command {cmd}")
+                return None
+        else:
+            # create empty path to allow other parts of the pipeline to work.
+            code, output = self.docker_runner.exec_run(
+                container, ["/bin/bash", "-c", f"echo test > {preprocessed_file}"], working_dir
+            )
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
             command.flags
@@ -402,14 +408,17 @@ class ClangPreprocesser(Action):
         if not self.openmp_check:
             return preprocessed_file, True
 
-        omp_tool_cmd = [self.OMP_TOOL_PATH, preprocessed_file]
-        cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
-        code, output = self.docker_runner.exec_run(container, cmd, working_dir)
-        if code != 0:
-            logging.error(f"Error OMP processing {target}: {output}")
-            return None
+        if not self.dry_run:
+            omp_tool_cmd = [self.OMP_TOOL_PATH, preprocessed_file]
+            cmd = ["/bin/bash", "-c", " ".join(omp_tool_cmd)]
+            code, output = self.docker_runner.exec_run(container, cmd, working_dir)
+            if code != 0:
+                logging.error(f"Error OMP processing {target}: {output}")
+                return None
 
-        return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
+            return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
+        else:
+            return preprocessed_file, False
 
     def _hash_file(self, path: str) -> str:
         with open(path) as f:
