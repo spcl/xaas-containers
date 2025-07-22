@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import cast
 from collections import defaultdict, namedtuple
 from itertools import islice
 from enum import Enum
@@ -17,7 +18,9 @@ from mashumaro.mixins.yaml import DataClassYAMLMixin
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.analyze import (
+    Compiler,
     CompileCommand,
+    NVCCCompileCommand,
     Config as AnalyzerConfig,
     DivergenceReason,
     SourceFileStatus,
@@ -334,8 +337,14 @@ class ClangPreprocesser(Action):
         command: CompileCommand,
         working_dir: str,
     ) -> tuple[str, bool] | None:
-        # FIXME: better check
-        if command.compiler != "/usr/bin/c++":
+        compiler = ""
+
+        if command.compiler_type == Compiler.CLANG:
+            compiler = self.CLANG_PATH
+        elif command.compiler_type == Compiler.NVCC:
+            compiler = command.compiler
+        else:
+            logging.error(f"Unsupported compiler {command.compiler}!")
             return None
 
         """
@@ -343,10 +352,20 @@ class ClangPreprocesser(Action):
         Otherwise, Clang will put a lot of additional comments for headers and flags.
         Thus, enabling OpenMP will change the file even if does not affect anything.
         """
-        preprocess_cmd = [self.CLANG_PATH, "-E", "-P"]
+        preprocess_cmd = [compiler, "-E", "-P"]
+        # additional flags for CUDA compiler
+        if compiler.endswith("nvcc"):
+            preprocess_cmd.extend(["-forward-unknown-to-host-compiler"])
 
         preprocess_cmd.extend(command.includes)
         preprocess_cmd.extend(command.definitions)
+
+        """
+            For CUDA, the additional includes can be hidden in response files.
+        """
+        if command.compiler_type == Compiler.NVCC:
+            for file in cast(NVCCCompileCommand, command).response_files:
+                preprocess_cmd.append(f"--options-file={file}")
 
         # OpenMP adds its own preprocessing directive
         preprocess_cmd.extend(command.flags)
@@ -364,6 +383,7 @@ class ClangPreprocesser(Action):
 
         if code != 0:
             logging.error(f"Error preprocessing {target}: {output}")
+            logging.error(f"Command {cmd}")
             return None
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
