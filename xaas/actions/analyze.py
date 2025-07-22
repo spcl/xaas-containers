@@ -13,6 +13,7 @@ from typing import Annotated
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from mashumaro.types import Discriminator
+from mashumaro.config import BaseConfig
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
@@ -68,6 +69,14 @@ class NVCCCompileCommand(CompileCommand):
 
 @dataclass
 class ProjectDivergence(DataClassYAMLMixin):
+    class Config(BaseConfig):
+        serialization_strategy = {
+            set[str] | str: {
+                "deserialize": lambda x: x if isinstance(x, str) else set(x),
+                "serialize": lambda x: x if isinstance(x, str) else list(x),
+            }
+        }
+
     reasons: dict[DivergenceReason, dict[str, set[str] | str]] = field(default_factory=dict)
 
 
