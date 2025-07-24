@@ -15,7 +15,7 @@ def get_loaded_modules():
         text=True,
         capture_output=True
     )
-    
+
     output = result.stdout
     modules = {}
 

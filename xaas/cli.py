@@ -9,6 +9,7 @@ import click
 from xaas.actions.analyze import BuildAnalyzer
 from xaas.actions.analyze import Config as AnalyzerConfig
 from xaas.actions.container import DockerImageBuilder
+from xaas.source.container import SourceContainerGenerator
 
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
@@ -16,7 +17,7 @@ from xaas.actions.build import Config as BuildConfig
 from xaas.actions.cpu_tuning import CPUTuning
 from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
-from xaas.config import DeployConfig, RunConfig
+from xaas.config import DeployConfig, RunConfig, SourceContainerConfig
 from xaas.config import XaaSConfig
 from xaas.actions.docker import Runner as DockerRunner
 
@@ -34,11 +35,30 @@ def cli() -> None:
     logging.info("XaaS Builder")
 
 
-@cli.command()
+@cli.group()
+def source() -> None:
+    logging.info("XaaS Source Builder")
+
+
+@source.command()
+@click.argument("config", type=click.Path(exists=True))
+def build(config) -> None:
+    initialize()
+
+    config_obj = SourceContainerConfig.load(config)
+    action = SourceContainerGenerator(config_obj)
+    action.generate()
+
+
+@cli.group()
+def ir() -> None:
+    logging.info("XaaS IR Builder")
+
+
+@ir.command()
 @click.argument("config", type=click.Path(exists=True))
 def buildgen(config) -> None:
     initialize()
-    logging.info("t")
 
     config_obj = RunConfig.load(config)
     action = BuildGenerator()
@@ -46,7 +66,7 @@ def buildgen(config) -> None:
     action.execute(config_obj)
 
 
-@cli.command()
+@ir.command()
 @click.argument("config", type=click.Path(exists=True))
 def analyze(config) -> None:
     initialize()
@@ -59,7 +79,7 @@ def analyze(config) -> None:
     action.execute(config_obj)
 
 
-@cli.group()
+@ir.group()
 def preprocess():
     pass
 
@@ -98,7 +118,7 @@ def preprocess_summary(config) -> None:
     action.print_summary(config_obj)
 
 
-@cli.group("cpu-tuning")
+@ir.group("cpu-tuning")
 def cpu_tuning():
     pass
 
@@ -132,12 +152,12 @@ def cpu_tuning_summary(config) -> None:
     action.print_summary(config_obj)
 
 
-@cli.group()
-def ir():
+@ir.group("irs")
+def irs():
     pass
 
 
-@ir.command("run")
+@irs.command("run")
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
 @click.option("--build-project", type=str, multiple=True)
@@ -154,7 +174,7 @@ def ir_compiler_run(config, parallel_workers, build_project) -> None:
     action.execute(config_obj)
 
 
-@ir.command("summary")
+@irs.command("summary")
 @click.argument("config", type=click.Path(exists=True))
 def ir_compiler_run_summary(config) -> None:
     initialize()
@@ -168,7 +188,7 @@ def ir_compiler_run_summary(config) -> None:
     action.print_summary(config_obj)
 
 
-@cli.command()
+@ir.command()
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--docker-repository", type=str, default="spcleth:xaas", help="Docker repository")
 def container(config, docker_repository) -> None:
@@ -184,7 +204,7 @@ def container(config, docker_repository) -> None:
     action.execute(config_obj)
 
 
-@cli.command()
+@ir.command()
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
 def deploy(config, parallel_workers) -> None:

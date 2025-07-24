@@ -2,13 +2,13 @@ import google.generativeai as genai
 import os
 import json
 import re
-import subprocess 
+import subprocess
 
 
 class GeminiInterface:
 
     PROMPTS = {
-    "default": """
+        "default": """
 
     I will share a build file, and I would like you to identify all the specialization points for an HPC program and the associated build flags used to enable those features during the build process. Please pay close attention to:
 
@@ -83,7 +83,7 @@ class GeminiInterface:
     JSON output schema. Use this JSON schema to format your response but do not include it in the output:
     {schema}
     """,
-    "bundle": """
+        "bundle": """
    I will provide you with a `bundle.yml` file, which is used to install packages, configure, and compile CMake-based HPC projects. Your task is to identify all specialization points relevant to the HPC program and extract the associated build flags that enable those features during the build process.
 
     Key Instructions:
@@ -134,8 +134,8 @@ class GeminiInterface:
         JSON output schema. Use this JSON schema to format your response but do not include it in the output:
         {schema}
 
-    """, 
-    "edit_makefile": """
+    """,
+        "edit_makefile": """
 
     You are an expert in HPC application build systems. Your task is to modify an existing Makefile by updating only specific build flags while keeping the rest of the file unchanged. Follow these instructions strictly:
 
@@ -217,8 +217,8 @@ class GeminiInterface:
     Here is the selected specialization points that you should enable:
     {selected_specializations}
 
-    """, 
-    "automated_selection": """
+    """,
+        "automated_selection": """
     You are an HPC systems expert. I will provide a JSON object listing available build-time specialization options for a scientific application.
 
     Your task is to analyze the available options and select the best combination of flags that will yield the highest possible performance on the current system. These options cover GPU backends, parallel programming libraries, FFT and BLAS libraries, vectorization flags, and performance tuning flags.
@@ -243,7 +243,7 @@ class GeminiInterface:
     Here are the available options:
     {options}
     """,
-    "gromacs_automated_selection": """
+        "gromacs_automated_selection": """
     You are an expert in high-performance computing (HPC) software optimization.
 
     I will provide you with:
@@ -278,9 +278,8 @@ class GeminiInterface:
 
     Available Specialization Options:
     {options}
-    """
+    """,
     }
-    
 
     def __init__(self):
         self.api_key = os.environ.get("GOOGLE_API_KEY")
@@ -294,14 +293,12 @@ class GeminiInterface:
         schema_path = os.path.join(script_dir, "json_schema.json")
 
         try:
-            with open(schema_path, 'r') as f:
+            with open(schema_path, "r") as f:
                 return json.load(f)
         except FileNotFoundError:
             raise FileNotFoundError("Error: JSON schema file not found.")
         except json.JSONDecodeError:
             raise ValueError("Error: Invalid JSON format in schema file.")
-        
-
 
     def query_gemini(self, prompt, model_name="gemini-2.0-flash-exp"):
         genai.configure(api_key=self.api_key)
@@ -312,7 +309,7 @@ class GeminiInterface:
             response_text = response.text.strip()
 
             # Debugging: Print the raw response from Gemini
-            #print(f"Raw Gemini Response: {response_text}")
+            # print(f"Raw Gemini Response: {response_text}")
 
             if not response_text:
                 return {"error": "Empty response from Gemini API"}
@@ -336,13 +333,13 @@ class GeminiInterface:
         for entry in os.listdir(directory):
             full_path = os.path.join(directory, entry)
             if os.path.isfile(full_path):
-                if entry.casefold() == 'cmakelists.txt':
+                if entry.casefold() == "cmakelists.txt":
                     cmake_path = full_path
-                elif entry.casefold() == 'makefile':
+                elif entry.casefold() == "makefile":
                     makefile_path = full_path
-                elif entry.casefold() == 'configure.ac':
+                elif entry.casefold() == "configure.ac":
                     configure_ac_path = full_path
-                elif entry.casefold() == 'bundle.yml':
+                elif entry.casefold() == "bundle.yml":
                     bundle_yml_path = full_path
 
         # Check "main" subdirectory if Makefile is not found
@@ -351,26 +348,25 @@ class GeminiInterface:
             if os.path.isdir(main_dir):
                 for entry in os.listdir(main_dir):
                     full_path = os.path.join(main_dir, entry)
-                    if os.path.isfile(full_path) and entry.casefold() == 'makefile':
+                    if os.path.isfile(full_path) and entry.casefold() == "makefile":
                         makefile_path = full_path
                         break
 
         return cmake_path, makefile_path, configure_ac_path, bundle_yml_path
-    
-
 
     def read_file(self, filepath):
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             return None
         except Exception:
             return None
 
-    
     def find_specialization_points(self, project_dir):
-        cmake_path, makefile_path, configure_ac_path, bundle_yml_path = self.find_build_files(project_dir)
+        cmake_path, makefile_path, configure_ac_path, bundle_yml_path = self.find_build_files(
+            project_dir
+        )
         file_content = ""
         query_type = "default"
 
@@ -390,9 +386,13 @@ class GeminiInterface:
             elif configure_ac_path:
                 file_content = self.read_file(configure_ac_path)
             else:
-                raise FileNotFoundError("Error: No Makefile, CMakeLists.txt, or configure.ac found.")
+                raise FileNotFoundError(
+                    "Error: No Makefile, CMakeLists.txt, or configure.ac found."
+                )
 
-        prompt = self.PROMPTS[query_type].format(schema=json.dumps(self.schema), file_content=file_content)
+        prompt = self.PROMPTS[query_type].format(
+            schema=json.dumps(self.schema), file_content=file_content
+        )
         response_json = self.query_gemini(prompt)
 
         # Handle API errors
@@ -406,8 +406,9 @@ class GeminiInterface:
         try:
             return json.loads(response_json)
         except json.JSONDecodeError:
-            raise ValueError(f"Error: Gemini response is not valid JSON. Response received:\n{response_json}")
-    
+            raise ValueError(
+                f"Error: Gemini response is not valid JSON. Response received:\n{response_json}"
+            )
 
     def edit_makefile(self, selected_specializations, project_dir):
         # Convert project_dir (folder name) into a full path under /users/<username>/
@@ -430,7 +431,7 @@ class GeminiInterface:
 
         prompt = self.PROMPTS["edit_makefile"].format(
             makefile_content=makefile_content,
-            selected_specializations=json.dumps(selected_specializations, indent=2)
+            selected_specializations=json.dumps(selected_specializations, indent=2),
         )
 
         modified_makefile = self.query_gemini(prompt)
@@ -440,7 +441,7 @@ class GeminiInterface:
 
         if not isinstance(modified_makefile, str):
             raise ValueError("Gemini returned an invalid Makefile format.")
-        
+
         print(modified_makefile)
 
         os.remove(makefile_path)
@@ -448,29 +449,32 @@ class GeminiInterface:
         with open(makefile_path, "w", encoding="utf-8") as f:
             f.write(modified_makefile)
 
-    def select_options(self, options, project_name=None):
-        
+    def select_options(self, options, project_name=None) -> dict:
+
         # automatically selects the best specialization options using Gemini.
         # If project_name is 'gromacs', include all docs from '../gromacs-2025.0/docs' in the prompt.
-    
+
         if project_name and project_name.lower() == "gromacs":
-            docs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../gromacs-2025.0/docs"))
+            docs_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "../gromacs-2025.0/docs")
+            )
             docs_content = ""
             if os.path.isdir(docs_dir):
                 for file in sorted(os.listdir(docs_dir)):
                     doc_path = os.path.join(docs_dir, file)
-                    if os.path.isfile(doc_path) and file.lower().endswith(('.md', '.txt', '.rst')):
-                        with open(doc_path, 'r', encoding='utf-8') as f:
+                    if os.path.isfile(doc_path) and file.lower().endswith((".md", ".txt", ".rst")):
+                        with open(doc_path, "r", encoding="utf-8") as f:
                             docs_content += f"\n\n# {file}\n" + f.read()
             else:
                 raise FileNotFoundError(f"Docs directory not found: {docs_dir}")
 
             prompt = self.PROMPTS["gromacs_automated_selection"].format(
-                docs=docs_content,
-                options=json.dumps(options, indent=2)
+                docs=docs_content, options=json.dumps(options, indent=2)
             )
         else:
-            prompt = self.PROMPTS["automated_selection"].format(options=json.dumps(options, indent=2))
+            prompt = self.PROMPTS["automated_selection"].format(
+                options=json.dumps(options, indent=2)
+            )
 
         response_text = self.query_gemini(prompt)
 
@@ -482,7 +486,6 @@ class GeminiInterface:
         except json.JSONDecodeError:
             raise ValueError(f"Error parsing Gemini response as JSON:\n{response_text}")
 
-        
 
 """
 if __name__ == "__main__":
@@ -502,3 +505,4 @@ if __name__ == "__main__":
     helper.edit_makefile(compilation_options, project_dir)
     #print(result)
 """
+

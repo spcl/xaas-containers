@@ -1,8 +1,17 @@
 import os
 
+
 class DockerfileCreator:
-    def __init__(self, project_directory, selected_specializations, system_features, build_command, base_image=None, output_file="Dockerfile"):
-    
+    def __init__(
+        self,
+        project_directory,
+        selected_specializations,
+        system_features,
+        build_command,
+        base_image=None,
+        output_file="Dockerfile",
+    ):
+
         self.project_directory = project_directory
         self.selected_specializations = selected_specializations
         self.system_features = system_features
@@ -13,13 +22,12 @@ class DockerfileCreator:
 
         self.architecture = self.extract_architecture()
         self.vectorization_flags = self.extract_vectorization_flags()
-    
+
     def extract_architecture(self):
         return self.system_features.get("CPU Info", {}).get("Architecture", "unknown")
 
     def extract_vectorization_flags(self):
         return self.system_features.get("CPU Info", {}).get("Supported Vectorizations", [])
-
 
     def add_base_image(self):
 
@@ -37,7 +45,6 @@ class DockerfileCreator:
         """
         self.dockerfile_content.append(base_image_content.strip())
 
-
     def add_multistage_phase(self):
 
         if self.base_image is not None:
@@ -48,8 +55,6 @@ class DockerfileCreator:
             """
             self.dockerfile_content.append(base_image_content.strip())
 
-        
-    
     def process_specializations(self):
         if self.selected_specializations.get("gpu_backends"):
             self.install_gpu_backend()
@@ -58,7 +63,6 @@ class DockerfileCreator:
         if self.selected_specializations.get("fft_libraries"):
             self.install_fft_lib()
 
-
     def install_gpu_backend(self):
 
         gpu_backends = self.selected_specializations.get("gpu_backends", {})
@@ -66,16 +70,18 @@ class DockerfileCreator:
         for backend, config in gpu_backends.items():
             if backend.lower() == "cuda":  # Case-insensitive check for CUDA
                 cuda_version = config.get("version")
-                
+
                 if not cuda_version:
-                    raise ValueError("CUDA version is required but missing in selected_specializations.")
+                    raise ValueError(
+                        "CUDA version is required but missing in selected_specializations."
+                    )
 
                 # Architecture mapping
                 arch_map = {
                     "x86_64": "x86_64",
                     "aarch64": "sbsa",
                     "arm64": "sbsa",
-                    "ppc64le": "ppc64le"
+                    "ppc64le": "ppc64le",
                 }
                 arch_key = arch_map.get(self.architecture, "x86_64")  # Default to x86_64 if unknown
                 repo_url = f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/{arch_key}/"
@@ -104,7 +110,9 @@ class DockerfileCreator:
             elif backend.lower in ["hip", "rocm"]:
                 rocm_version = config.get("version")
                 if not rocm_version:
-                    raise ValueError("ROCm version is required but missing in selected_specializations.")
+                    raise ValueError(
+                        "ROCm version is required but missing in selected_specializations."
+                    )
 
                 # ROCm installation commands
                 rocm_install_commands = f"""
@@ -119,11 +127,10 @@ class DockerfileCreator:
 
                 self.dockerfile_content.append(rocm_install_commands.strip())
 
-
     def install_fft_lib(self):
 
         # mkl source command might be incomplete
-        
+
         fft_libraries = self.selected_specializations.get("fft_libraries", {})
 
         # Prioritize MKL if present
@@ -150,7 +157,6 @@ class DockerfileCreator:
                 """
                 self.dockerfile_content.append(mkl_install_commands.strip())
                 return  # Stop here, don't install FFTW if MKL is chosen
-            
 
         # Install rocFFT if explicitly selected
         for fft_lib in fft_libraries.keys():
@@ -170,7 +176,7 @@ class DockerfileCreator:
                 if config.get("used_as_default", False):
                     print(f"Skipping installation of {fft_lib} (used as default).")
                     return
-                
+
                 # Download and extract FFTW
                 fftw_install_commands = """
                 # Download and extract FFTW
@@ -189,7 +195,9 @@ class DockerfileCreator:
 
                 # Add architecture-specific flags
                 if self.architecture.startswith("x86"):
-                    configure_command += " \\\n                    --enable-sse2 --enable-avx --enable-avx2"
+                    configure_command += (
+                        " \\\n                    --enable-sse2 --enable-avx --enable-avx2"
+                    )
                     if "avx512" in self.vectorization_flags:
                         configure_command += " --enable-avx512"
                 elif self.architecture in ["aarch64", "arm64"]:
@@ -209,7 +217,6 @@ class DockerfileCreator:
                 self.dockerfile_content.append(configure_command.strip())
                 self.dockerfile_content.append(build_commands.strip())
                 return  # Stop after installing FFTW (ensures only one FFT library)
-            
 
     def install_linear_algebra_lib(self):
         linear_algebra_libs = self.selected_specializations.get("linear_algebra_libraries", {})
@@ -227,8 +234,6 @@ class DockerfileCreator:
                 RUN apt install -y libscalapack-mpi-dev
                 """
                 self.dockerfile_content.append(scalapack_install_commands.strip())
-            
-
 
     def copy_project_directory(self):
         app_name = os.path.basename(os.path.normpath(self.project_directory))
@@ -247,21 +252,16 @@ class DockerfileCreator:
         """
         self.dockerfile_content.append(content.strip())
 
-    def application_build_command(self): 
-        # CMake project 
-        if self.project_directory in ["q-e", "gromacs-2025.0", "vpic-kokkos", "llama.cpp", "dwarf-p-cloudsc", "icon-model"]:
-            self.dockerfile_content.append(self.build_command.strip())
+    def application_build_command(self):
+        self.dockerfile_content.append(self.build_command.strip())
 
-    
     def add_default_command(self):
         self.dockerfile_content.append("# Default command (modify if needed)")
-        self.dockerfile_content.append("CMD [\"/bin/bash\"]")
-
-
+        self.dockerfile_content.append('CMD ["/bin/bash"]')
 
     def create_dockerfile(self):
 
-        # source container 
+        # source container
         self.add_base_image()
         self.copy_project_directory()
 
@@ -269,14 +269,13 @@ class DockerfileCreator:
 
         self.add_multistage_phase()
         self.process_specializations()
-        self.copy_from_first_build_stage
+        self.copy_from_first_build_stage()
         self.application_build_command()
         self.add_default_command()
-        
-        #with open(self.output_file, "w") as file:
-            #file.write("\n".join(self.dockerfile_content))
-        
-        #print(f"Dockerfile created at: {self.output_file}")
+
+        # with open(self.output_file, "w") as file:
+        # file.write("\n".join(self.dockerfile_content))
+
+        # print(f"Dockerfile created at: {self.output_file}")
         print("Dockerfile content:")
         print("\n".join(self.dockerfile_content))
-

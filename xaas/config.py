@@ -21,6 +21,16 @@ class BuildSystem(Enum):
     AUTOTOOLS = "autotools"
 
 
+class SourceContainerMode(Enum):
+    INTERACTIVE = "interactive"
+    PREDEFINED = "predefined"
+    AUTOMATED = "automated"
+
+
+class SourceContainerAutomated(Enum):
+    GEMINI = "gemini"
+
+
 @dataclass
 class DockerLayerVersion(DataClassYAMLMixin):
     flag_name: str
@@ -183,3 +193,36 @@ class DeployConfig(DataClassYAMLMixin):
     @classmethod
     def from_instance(cls, instance):
         return cls(**asdict(instance))
+
+
+@dataclass
+class SourceContainerConfig(DataClassYAMLMixin):
+    working_directory: str
+    source_directory: str
+    project_name: str
+    # FIXME: remove that
+    predefined_config_string: str | None
+    mode: SourceContainerMode
+    system_discovery: str | None = None
+    predefined_mode: dict[str, str] | None = None
+    automated_mode: SourceContainerAutomated | None = None
+    deployment_base_image: str | None = None
+    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
+
+    @staticmethod
+    def load(config_path: str) -> SourceContainerConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return SourceContainerConfig.from_yaml(f)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @classmethod
+    def from_instance(cls, instance):
+        obj = cls(**asdict(instance))
+        obj.layers_deps = copy.deepcopy(instance.layers_deps)
+        return obj
