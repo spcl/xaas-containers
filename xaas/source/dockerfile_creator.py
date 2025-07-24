@@ -1,22 +1,23 @@
 import os
+import logging
 
 
 class DockerfileCreator:
     def __init__(
         self,
-        project_directory,
+        project_directory: str,
+        working_directory: str,
         selected_specializations,
         system_features,
         build_command,
         base_image=None,
-        output_file="Dockerfile",
     ):
 
         self.project_directory = project_directory
+        self.working_directory = working_directory
         self.selected_specializations = selected_specializations
         self.system_features = system_features
         self.build_command = build_command
-        self.output_file = output_file
         self.dockerfile_content = []
         self.base_image = base_image
 
@@ -273,9 +274,10 @@ class DockerfileCreator:
         self.application_build_command()
         self.add_default_command()
 
-        # with open(self.output_file, "w") as file:
-        # file.write("\n".join(self.dockerfile_content))
+        os.makedirs(self.working_directory, exist_ok=True)
+        output_file = os.path.join(self.working_directory, "Dockerfile.source")
 
-        # print(f"Dockerfile created at: {self.output_file}")
-        print("Dockerfile content:")
-        print("\n".join(self.dockerfile_content))
+        with open(output_file, "w") as file:
+            file.write("\n".join(self.dockerfile_content))
+
+        logging.info(f"Dockerfile created at: {output_file}")
