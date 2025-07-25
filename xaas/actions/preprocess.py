@@ -23,7 +23,7 @@ from xaas.actions.analyze import (
     SourceFileStatus,
     ProjectDivergence,
 )
-from xaas.actions.docker import VolumeMount
+from xaas.docker import VolumeMount
 
 from concurrent.futures import ThreadPoolExecutor, as_completed, process
 
@@ -217,8 +217,8 @@ class ClangPreprocesser(Action):
 
                             if not is_divergent:
                                 """
-                                    This file is identical across all builds - we can skip it.
-                                    But we need to note that all projects using it should include it.
+                                This file is identical across all builds - we can skip it.
+                                But we need to note that all projects using it should include it.
                                 """
                                 for project in status.present_in_projects:
                                     cmd = config.build_comparison.project_results[project].files[
