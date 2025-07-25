@@ -3,10 +3,11 @@ import logging
 import os
 import re
 import tempfile
+from typing import cast
 from pathlib import Path
 
 from xaas.actions.action import Action
-from xaas.actions.analyze import DivergenceReason, CompileCommand
+from xaas.actions.analyze import DivergenceReason, CompileCommand, Compiler, NVCCCompileCommand
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.ir import PreprocessingResult
 from xaas.actions.preprocess import FileStatus
@@ -23,6 +24,8 @@ class DockerImageBuilder(Action):
         self.BASE_IMAGE_DEV = "spcleth/xaas:llvm-19-dev"
 
         self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
+
+        self.CLANG_PATH = "/usr/bin/c++"
 
         self.docker_repository = docker_repository
 
@@ -59,6 +62,9 @@ class DockerImageBuilder(Action):
 
         return True
 
+    def _generate_nvcc(self, cmd: NVCCCompileCommand, source_file: str, output_file: str) -> str:
+        return f"{self.CLANG_PATH} -xir -c {source_file} -o {output_file}"
+
     def _generate_bashscript(
         self, project_dir: str, config: PreprocessingResult
     ) -> tuple[str, bool]:
@@ -79,32 +85,39 @@ class DockerImageBuilder(Action):
             if project_dir not in result.projects:
                 continue
 
-            cmake_cmd = compile_dbs[target]["command"]
+            ir_file = result.projects[project_dir].ir_file.file
             cmake_directory = compile_dbs[target]["directory"]
+            source_file = compile_dbs[target]["file"]
+            output_file = compile_dbs[target]["output"]
 
+            if result.projects[project_dir].command.compiler_type == Compiler.NVCC:
+                ir_cmd = self._generate_nvcc(
+                    cast(NVCCCompileCommand, result.projects[project_dir].command),
+                    ir_file,
+                    output_file,
+                )
+            else:
+                cmake_cmd = compile_dbs[target]["command"]
+
+                ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
+
+                # TODO: is this general enough?
+                compiler = ir_cmd.split(" ")[0]
+                ir_cmd = ir_cmd.replace(compiler, f"{compiler} -xir")
+
+            # Locate the output file of compilation
             # The paths can be relative:
             # directory: /build/a/b
             # target: a/b/x/c.cpp
             # actual file in the command
-            actual_target = os.path.relpath(
-                os.path.join("/build", compile_dbs[target]["output"]), cmake_directory
-            )
-            # print(compile_dbs[src]["output"], actual_target)
+            actual_target = os.path.relpath(os.path.join("/build", output_file), cmake_directory)
 
-            ir_file = result.projects[project_dir].ir_file.file
-            ir_cmd = cmake_cmd.replace(compile_dbs[target]["file"], ir_file)
-
-            # TODO: is this general enough?
-            compiler = ir_cmd.split(" ")[0]
-            ir_cmd = ir_cmd.replace(compiler, f"{compiler} -xir")
-
+            # Replace the
             # make sure the path does not mess anything else
             # this happens in gromacs - path to target is included in our path to ir file
             # we can't do whole word boundary with \b because we have slashes, which
             # are trated as not words
-            ir_cmd = re.sub(
-                rf"-o\s+\b{actual_target}\b", f"-o {compile_dbs[target]['output']}", ir_cmd
-            )
+            ir_cmd = re.sub(rf"-o\s+\b{actual_target}\b", f"-o {output_file}", ir_cmd)
 
             if len(result.projects[project_dir].cpu_tuning) > 0:
                 opt_cmd = self._cpu_tune(ir_file, result.projects[project_dir], config.build)
