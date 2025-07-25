@@ -20,13 +20,10 @@ class Application(str, Enum):
 
 class ApplicationSpecialization:
 
-    def __init__(
-        self, project_dir: str, system_features: dict, gemini_interface: GeminiInterface | None
-    ):
+    def __init__(self, system_features: dict, gemini_interface: GeminiInterface | None):
 
         self._gemini_interface = gemini_interface
         self._system_features = system_features
-        self._project_dir = project_dir
 
     def gromacs(self, selected_specializations: dict, specialization_points: dict) -> str:
         release_build = "-DCMAKE_BUILD_TYPE=Release "
@@ -34,6 +31,12 @@ class ApplicationSpecialization:
             selected_specializations, specialization_points
         )
         build_flags_string = release_build + build_flags_string
+
+        if (
+            "fft_libraries" in selected_specializations
+            and "fftw3" in selected_specializations["fft_libraries"]
+        ):
+            build_flags_string = f" {build_flags_string} -DGMX_BUILD_OWN_FFTW=ON"
 
         return f"""
             RUN mkdir build \\
@@ -47,7 +50,9 @@ class ApplicationSpecialization:
             """
 
     def milc(self, selected_specializations: dict, specialization_points: dict) -> str:
-        self._gemini_interface.edit_makefile(selected_specializations, self._project_dir)
+        assert self._gemini_interface is not None, "Gemini interface is not initialized."
+        # FIXME: this steep needs to be added to the container build. we are missing source dir
+        self._gemini_interface.edit_makefile(selected_specializations, "")
         # FIXME: Make this configurable
         milc_application_name = "su3_rmd"
         return f"""
@@ -57,7 +62,9 @@ class ApplicationSpecialization:
         """
 
     def openqcd(self, selected_specializations: dict, specialization_points: dict) -> str:
-        self._gemini_interface.edit_makefile(selected_specializations, project_directory_name)
+        assert self._gemini_interface is not None, "Gemini interface is not initialized."
+        # FIXME: this steep needs to be added to the container build. we are missing source dir
+        self._gemini_interface.edit_makefile(selected_specializations, "")
         return """
         ENV MPI_INCLUDE=/usr/local/mpich/include
         ENV MPI_HOME=/usr/local/mpich/lib 

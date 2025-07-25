@@ -1,34 +1,36 @@
 import os
 import logging
+import inspect
 
 
 class DockerfileCreator:
-    def __init__(
-        self,
-        project_directory: str,
-        working_directory: str,
-        selected_specializations,
-        system_features,
-        build_command,
-        base_image=None,
-    ):
-
-        self.project_directory = project_directory
+    def __init__(self, project_name: str, working_directory: str, cpu_architecture: str):
+        self.project_name = project_name
         self.working_directory = working_directory
-        self.selected_specializations = selected_specializations
-        self.system_features = system_features
-        self.build_command = build_command
         self.dockerfile_content = []
-        self.base_image = base_image
 
-        self.architecture = self.extract_architecture()
-        self.vectorization_flags = self.extract_vectorization_flags()
+        self.architecture = cpu_architecture
 
-    def extract_architecture(self):
-        return self.system_features.get("CPU Info", {}).get("Architecture", "unknown")
+    def create_source_dockerfile(self, project_directory: str) -> str:
 
-    def extract_vectorization_flags(self):
-        return self.system_features.get("CPU Info", {}).get("Supported Vectorizations", [])
+        # source container
+        self.add_base_image()
+        self.copy_project_directory(project_directory)
+        self.dockerfile_content.append("")
+
+        os.makedirs(self.working_directory, exist_ok=True)
+        output_file = os.path.join(self.working_directory, "Dockerfile.source")
+
+        with open(output_file, "w") as file:
+            file.write("\n".join(self.dockerfile_content))
+
+        logging.info(f"Dockerfile created at: {output_file}")
+
+        return output_file
+
+    @staticmethod
+    def extract_vectorization_flags(system_features: dict) -> list:
+        return system_features.get("CPU Info", {}).get("Supported Vectorizations", [])
 
     def add_base_image(self):
 
@@ -41,32 +43,36 @@ class DockerfileCreator:
 
         base_image_content = f"""
         FROM {base_image} AS SOURCE 
-        # Use Bash as the default shell for all RUN commands
-        SHELL ["/bin/bash", "-c"]
         """
         self.dockerfile_content.append(base_image_content.strip())
 
-    def add_multistage_phase(self):
+    def add_multistage_phase(self, source_image: str, base_image: str | None):
 
-        if self.base_image is not None:
+        base_image_content = f"""
+        FROM {source_image} AS SOURCE
+        """
+        self.dockerfile_content.append(base_image_content.strip())
+
+        if base_image is not None:
             base_image_content = f"""
-            FROM {self.base_image} AS DEPLOYMENT 
+            FROM {base_image} AS DEPLOYMENT 
             # Use Bash as the default shell for all RUN commands
             SHELL ["/bin/bash", "-c"]
             """
             self.dockerfile_content.append(base_image_content.strip())
 
-    def process_specializations(self):
-        if self.selected_specializations.get("gpu_backends"):
-            self.install_gpu_backend()
-        if self.selected_specializations.get("linear_algebra_libraries"):
-            self.install_linear_algebra_lib()
-        if self.selected_specializations.get("fft_libraries"):
-            self.install_fft_lib()
+    def process_specializations(self, selected_specializations: dict, system_features: dict):
+        if selected_specializations.get("gpu_backends"):
+            self.install_gpu_backend(selected_specializations)
+        if selected_specializations.get("linear_algebra_libraries"):
+            self.install_linear_algebra_lib(selected_specializations)
+        if selected_specializations.get("fft_libraries"):
+            self.install_fft_lib(selected_specializations, system_features)
 
-    def install_gpu_backend(self):
+    def install_gpu_backend(self, selected_specializations: dict):
 
-        gpu_backends = self.selected_specializations.get("gpu_backends", {})
+        # FIXME: move this into separate dependencies
+        gpu_backends = selected_specializations.get("gpu_backends", {})
 
         for backend, config in gpu_backends.items():
             if backend.lower() == "cuda":  # Case-insensitive check for CUDA
@@ -128,11 +134,12 @@ class DockerfileCreator:
 
                 self.dockerfile_content.append(rocm_install_commands.strip())
 
-    def install_fft_lib(self):
+    def install_fft_lib(self, selected_specializations: dict, system_features: dict):
 
+        # FIXME: move this into separate dependencies
         # mkl source command might be incomplete
 
-        fft_libraries = self.selected_specializations.get("fft_libraries", {})
+        fft_libraries = selected_specializations.get("fft_libraries", {})
 
         # Prioritize MKL if present
         for fft_lib in fft_libraries.keys():
@@ -173,7 +180,8 @@ class DockerfileCreator:
 
         # If MKL is not selected, check for FFTW
         for fft_lib, config in fft_libraries.items():
-            if fft_lib in ["FFTW", "FFTW3"]:
+            print(fft_lib)
+            if fft_lib.lower() in ["fftw", "fftw3"]:
                 if config.get("used_as_default", False):
                     print(f"Skipping installation of {fft_lib} (used as default).")
                     return
@@ -199,7 +207,7 @@ class DockerfileCreator:
                     configure_command += (
                         " \\\n                    --enable-sse2 --enable-avx --enable-avx2"
                     )
-                    if "avx512" in self.vectorization_flags:
+                    if "avx512" in self.extract_vectorization_flags(system_features):
                         configure_command += " --enable-avx512"
                 elif self.architecture in ["aarch64", "arm64"]:
                     configure_command += " \\\n                    --enable-neon"
@@ -219,8 +227,9 @@ class DockerfileCreator:
                 self.dockerfile_content.append(build_commands.strip())
                 return  # Stop after installing FFTW (ensures only one FFT library)
 
-    def install_linear_algebra_lib(self):
-        linear_algebra_libs = self.selected_specializations.get("linear_algebra_libraries", {})
+    def install_linear_algebra_lib(self, selected_specializations: dict):
+        # FIXME: move this into separate dependencies
+        linear_algebra_libs = selected_specializations.get("linear_algebra_libraries", {})
 
         for lib in linear_algebra_libs.keys():
             if lib == "OpenBLAS":
@@ -236,46 +245,55 @@ class DockerfileCreator:
                 """
                 self.dockerfile_content.append(scalapack_install_commands.strip())
 
-    def copy_project_directory(self):
-        app_name = os.path.basename(os.path.normpath(self.project_directory))
-        content = f"""
-        COPY {self.project_directory} /{app_name}
-        WORKDIR /{app_name}
+    def copy_project_directory(self, project_directory):
+        app_name = self.project_name
+        content = inspect.cleandoc(
+            f"""
+            COPY {project_directory} /{app_name}
+            WORKDIR /{app_name}
         """
+        )
         self.dockerfile_content.append(content.strip())
 
-    def copy_from_first_build_stage(self):
-        app_name = os.path.basename(os.path.normpath(self.project_directory))
+    def copy_from_first_build_stage(self, has_different_build_image: bool):
 
-        content = f"""
-        COPY --from=SOURCE /{app_name} /{app_name}
-        WORKDIR /{app_name}
-        """
-        self.dockerfile_content.append(content.strip())
+        if has_different_build_image:
+            content = inspect.cleandoc(
+                """
+            COPY --link --from=SOURCE /source /source
+            """
+            )
+            self.dockerfile_content.append(content.strip())
 
-    def application_build_command(self):
-        self.dockerfile_content.append(self.build_command.strip())
+    def application_build_command(self, build_command: str):
+        self.dockerfile_content.append(build_command.strip())
 
     def add_default_command(self):
         self.dockerfile_content.append("# Default command (modify if needed)")
         self.dockerfile_content.append('CMD ["/bin/bash"]')
 
-    def create_dockerfile(self):
+    def add_build_args(self):
+        self.dockerfile_content.append("ARG nproc")
 
-        # source container
-        self.add_base_image()
-        self.copy_project_directory()
+    def create_deployment_dockerfile(
+        self,
+        selected_specializations,
+        system_features,
+        build_command: str,
+        source_image: str,
+        deployment_base_image: str | None,
+    ):
 
         # multi-stage build (deployment))
-
-        self.add_multistage_phase()
-        self.process_specializations()
-        self.copy_from_first_build_stage()
-        self.application_build_command()
+        self.add_multistage_phase(source_image, deployment_base_image)
+        self.add_build_args()
+        self.process_specializations(selected_specializations, system_features)
+        self.copy_from_first_build_stage(deployment_base_image is not None)
+        self.application_build_command(build_command)
         self.add_default_command()
 
         os.makedirs(self.working_directory, exist_ok=True)
-        output_file = os.path.join(self.working_directory, "Dockerfile.source")
+        output_file = os.path.join(self.working_directory, "Dockerfile.deployment")
 
         with open(output_file, "w") as file:
             file.write("\n".join(self.dockerfile_content))

@@ -200,14 +200,8 @@ class SourceContainerConfig(DataClassYAMLMixin):
     working_directory: str
     source_directory: str
     project_name: str
-    # FIXME: remove that
-    predefined_config_string: str | None
-    mode: SourceContainerMode
-    system_discovery: str | None = None
-    predefined_mode: dict[str, str] | None = None
-    automated_mode: SourceContainerAutomated | None = None
-    deployment_base_image: str | None = None
-    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
+    cpu_architecture: str = "x86_64"
+    docker_repository: str = "spcleth/xaas-artifact"
 
     @staticmethod
     def load(config_path: str) -> SourceContainerConfig:
@@ -224,5 +218,48 @@ class SourceContainerConfig(DataClassYAMLMixin):
     @classmethod
     def from_instance(cls, instance):
         obj = cls(**asdict(instance))
-        obj.layers_deps = copy.deepcopy(instance.layers_deps)
+        return obj
+
+
+@dataclass
+class SourceDeploymentConfigSystem(DataClassYAMLMixin):
+    name: str
+    cpu_architecture: str = "x86_64"
+    system_discovery: str | None = None
+    base_image: str | None = None
+
+
+@dataclass
+class SourceDeploymentConfigMode(DataClassYAMLMixin):
+    mode: SourceContainerMode
+    # FIXME: remove that - replace with mode
+    predefined_config_string: str | None
+    predefined_mode: dict[str, str] | None = None
+    automated_mode: SourceContainerAutomated | None = None
+
+
+@dataclass
+class SourceDeploymentConfig(DataClassYAMLMixin):
+    source_container: str
+    working_directory: str
+    project_name: str
+    system: SourceDeploymentConfigSystem
+    mode: SourceDeploymentConfigMode
+    docker_repository: str = "spcleth/xaas-artifact"
+
+    @staticmethod
+    def load(config_path: str) -> SourceDeploymentConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return SourceDeploymentConfig.from_yaml(f)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @classmethod
+    def from_instance(cls, instance):
+        obj = cls(**asdict(instance))
         return obj

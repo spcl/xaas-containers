@@ -1,8 +1,9 @@
-import argparse
 import json
 import logging
+import os
 
-from xaas.config import SourceContainerConfig, SourceContainerMode
+from xaas.config import SourceContainerConfig, SourceContainerMode, SourceDeploymentConfig
+from xaas.docker import Runner as DockerRunner
 from xaas.source.applications import (
     Application,
     ApplicationSpecialization,
@@ -19,7 +20,33 @@ class SourceContainerGenerator:
 
     def __init__(self, config: SourceContainerConfig):
         self._config = config
+        self._docker_runner = DockerRunner(self._config.docker_repository)
+
+    def generate(self):
+
+        dockerfile_creator = DockerfileCreator(
+            self._config.project_name,
+            self._config.working_directory,
+            self._config.cpu_architecture,
+        )
+        dfile_path = dockerfile_creator.create_source_dockerfile(self._config.source_directory)
+
+        image_name = f"{self._config.docker_repository}:{self._config.project_name}-source-{self._config.cpu_architecture}"
+        logging.info(f"Building Docker image: {image_name}")
+        build_dir = os.path.join(self._config.working_directory, os.path.pardir)
+        self._docker_runner.build(
+            dockerfile=dfile_path,
+            path=build_dir,
+            tag=image_name,
+        )
+
+
+class SourceContainerDeployment:
+
+    def __init__(self, config: SourceDeploymentConfig):
+        self._config = config
         self._gemini_interface: GeminiInterface | None = None
+        self._docker_runner = DockerRunner(self._config.docker_repository)
 
         if self._config.mode == SourceContainerMode.AUTOMATED:
             self._gemini_interface = GeminiInterface()
@@ -31,8 +58,8 @@ class SourceContainerGenerator:
 
         application = Application(self._config.project_name)
 
-        if self._config.system_discovery is not None:
-            with open(self._config.system_discovery, "r") as f:
+        if self._config.system.system_discovery is not None:
+            with open(self._config.system.system_discovery) as f:
                 system_features = json.load(f)
             logging.debug(f"Loaded system features: {system_features}")
         else:
@@ -43,38 +70,49 @@ class SourceContainerGenerator:
         options = checker.perform_check()
         logging.debug(f"Available specialization options: {options}")
 
-        if self._config.mode == SourceContainerMode.AUTOMATED:
+        if self._config.mode.mode == SourceContainerMode.AUTOMATED:
             assert self._gemini_interface is not None, "Gemini interface is not initialized."
             selected_specializations = self._gemini_interface.select_options(
                 options, self._config.project_name
             )
-        elif self._config.mode in [SourceContainerMode.PREDEFINED, SourceContainerMode.INTERACTIVE]:
+        elif self._config.mode.mode in [
+            SourceContainerMode.PREDEFINED,
+            SourceContainerMode.INTERACTIVE,
+        ]:
             selected_specializations = utils.get_user_choices(
                 checker,
                 options,
                 self._config.project_name,
                 system_features,
-                mode=self._config.mode,
-                test_options_str=self._config.predefined_config_string,
+                mode=self._config.mode.mode,
+                test_options_str=self._config.mode.predefined_config_string,
             )
             logging.debug(f"Selected specializations: {selected_specializations}")
         else:
             raise RuntimeError(f"Unsupported mode: {self._config.mode}")
 
-        app_specialzer = ApplicationSpecialization(
-            self._config.source_directory, system_features, self._gemini_interface
-        )
+        app_specialzer = ApplicationSpecialization(system_features, self._gemini_interface)
         app_func = ApplicationSpecializationBuilder.application_configurer(application)
         build_command = app_func(app_specialzer, selected_specializations, specialization_points)
 
         dockerfile_creator = DockerfileCreator(
-            self._config.source_directory,
+            self._config.project_name,
+            self._config.working_directory,
+            self._config.system.cpu_architecture,
+        )
+        dockerfile_creator.create_deployment_dockerfile(
             selected_specializations,
             system_features,
             build_command,
-            base_image=self._config.deployment_base_image,
+            self._config.source_container,
+            self._config.system.base_image,
         )
-        dockerfile_creator.create_dockerfile()
 
-    def deploy(self):
-        pass
+        # image_name = f"{self._config.docker_repository}:{self._config.project_name}-source-deploy-{self._config.cpu_architecture}-{self._config.deployment_name}"
+        # logging.info(f"Building deployed Docker image: {image_name}")
+        # build_dir = os.path.join(self._config.working_directory, os.path.pardir)
+        # self._docker_runner.build(
+        #    dockerfile=os.path.join(self._config.working_directory, "Dockerfile.deployment"),
+        #    path=build_dir,
+        #    tag=image_name,
+        # )

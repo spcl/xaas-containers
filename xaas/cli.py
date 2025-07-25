@@ -9,7 +9,7 @@ import click
 from xaas.actions.analyze import BuildAnalyzer
 from xaas.actions.analyze import Config as AnalyzerConfig
 from xaas.actions.container import DockerImageBuilder
-from xaas.source.container import SourceContainerGenerator
+from xaas.source.container import SourceContainerDeployment, SourceContainerGenerator
 
 from xaas.actions.ir import IRCompiler
 from xaas.actions.build import BuildGenerator
@@ -17,9 +17,9 @@ from xaas.actions.build import Config as BuildConfig
 from xaas.actions.cpu_tuning import CPUTuning
 from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
-from xaas.config import DeployConfig, RunConfig, SourceContainerConfig
+from xaas.config import DeployConfig, RunConfig, SourceContainerConfig, SourceDeploymentConfig
 from xaas.config import XaaSConfig
-from xaas.actions.docker import Runner as DockerRunner
+from xaas.docker import Runner as DockerRunner
 
 
 def initialize():
@@ -40,13 +40,23 @@ def source() -> None:
     logging.info("XaaS Source Builder")
 
 
-@source.command()
+@source.command("container")
 @click.argument("config", type=click.Path(exists=True))
-def build(config) -> None:
+def source_container(config) -> None:
     initialize()
 
     config_obj = SourceContainerConfig.load(config)
     action = SourceContainerGenerator(config_obj)
+    action.generate()
+
+
+@source.command("deploy")
+@click.argument("config", type=click.Path(exists=True))
+def source_deploy(config) -> None:
+    initialize()
+
+    config_obj = SourceDeploymentConfig.load(config)
+    action = SourceContainerDeployment(config_obj)
     action.generate()
 
 

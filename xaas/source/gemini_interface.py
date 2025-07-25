@@ -455,6 +455,7 @@ class GeminiInterface:
         # If project_name is 'gromacs', include all docs from '../gromacs-2025.0/docs' in the prompt.
 
         if project_name and project_name.lower() == "gromacs":
+            # FIXME: make configurable
             docs_dir = os.path.abspath(
                 os.path.join(os.path.dirname(__file__), "../gromacs-2025.0/docs")
             )
