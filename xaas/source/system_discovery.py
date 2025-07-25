@@ -476,9 +476,22 @@ def get_cuda_version():
         return "Version not found"
     return "Version not found"
 
+def find_sycl_library():
+    try:
+        output = subprocess.run("ldd $(which sycl-ls)", capture_output=True, shell=True, text=True)
+
+        if output.returncode != 0:
+            return None
+
+        match = re.search(r'libsycl\.so\.(\d+) => (/\S+)', output.stdout)
+        return (match.group(2), match.group(1)) if match else None
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running lscpu: {e}")
+        return None
+
 # verified
 # To be tested: the shared libraries it returns- I'm not sure if they are correct or not or if we need them
-# To be tested: SYCL
 # Note: openCL's version finding might be wrong (needs a check)
 def get_gpu_backends():
     # Detect GPU backends and their library locations and versions
@@ -519,7 +532,7 @@ def get_gpu_backends():
     try:
         opt_entries = os.listdir("/opt")
         rocm_dirs = [entry for entry in opt_entries if entry.startswith("rocm-")]
-        
+
         if rocm_dirs:
             #print(f"Detected ROCm directories in /opt: {rocm_dirs}")
             gpu_backends["ROCm"]["version"] = get_rocm_version()
@@ -527,6 +540,14 @@ def get_gpu_backends():
             print("No ROCm directories found in /opt.")
     except Exception as e:
         print(f"Error accessing /opt directory: {e}")
+
+    # supported platforms - Intel oneAPI SYCL
+    # They don't install libsycl.so in a path available to ldconfig
+    # TODO: In future, look also into AdaptiveCpp
+    sycl_libs = find_sycl_library()
+    if sycl_libs:
+        gpu_backends["SYCL"]["libraries"] = sycl_libs[1]
+        gpu_backends["SYCL"]["version"] = sycl_libs[0]
 
     # Fallback to LD_LIBRARY_PATH if versions are not found
     ld_versions = get_version_from_ld_library_path()
@@ -536,18 +557,16 @@ def get_gpu_backends():
 
     return gpu_backends
 
-"""
 def get_compilers():
     # Detect installed compilers on the system 
     compilers = {}
-    for compiler in ["gcc", "g++", "clang", "icc", "ifort", "mpicc", "mpicxx", "mpifort"]:
+    for compiler in ["gcc", "g++", "clang", "clang++", "icc", "icx", "icpx", "ifort", "mpicc", "mpicxx", "mpifort"]:
         try:
             version = subprocess.check_output(f"{compiler} --version", shell=True, text=True).splitlines()[0]
             compilers[compiler] = version
         except subprocess.CalledProcessError:
             compilers[compiler] = "Not found"
     return compilers
-"""
 
 def discover_system():
     results = {}
@@ -588,23 +607,18 @@ def discover_system():
     loaded_modules = get_loaded_modules()
     results["Loaded Modules"] = loaded_modules
 
-    """
     # Compilers
     compilers = get_compilers()
     results["Compilers"] = compilers
-    """
 
     # return an dictionary of the results
     return results 
 
-"""
 # For testing only
 if __name__ == "__main__":
     system_info = discover_system()
-    print("System Information:")
-    for key, value in system_info.items():
-        print(f"{key}: {value}")
-"""
+    with open("system_info.json", "w") as f:
+        json.dump(system_info, f, indent=2)
 
 
 
