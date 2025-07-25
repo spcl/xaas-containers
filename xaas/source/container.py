@@ -51,10 +51,20 @@ class SourceContainerDeployment:
         if self._config.mode == SourceContainerMode.AUTOMATED:
             self._gemini_interface = GeminiInterface()
 
-    def generate(self):
+    @staticmethod
+    def intersect_specializations(
+        app_name: str, system_features: dict
+    ) -> tuple[dict, dict, Checker]:
 
-        specialization_points = utils.load_specialization_points(self._config.project_name)
+        specialization_points = utils.load_specialization_points(app_name)
         logging.debug(f"Loaded specialization points: {specialization_points}")
+
+        checker = Checker(specialization_points, system_features)
+        options = checker.perform_check()
+
+        return specialization_points, options, checker
+
+    def generate(self, parallel_workers: int):
 
         application = Application(self._config.project_name)
 
@@ -66,8 +76,9 @@ class SourceContainerDeployment:
             system_features = discover_system()
             logging.debug(f"Discovered system features: {system_features}")
 
-        checker = Checker(specialization_points, system_features)
-        options = checker.perform_check()
+        specialization_points, options, checker = self.intersect_specializations(
+            self._config.project_name, system_features
+        )
         logging.debug(f"Available specialization options: {options}")
 
         if self._config.mode.mode == SourceContainerMode.AUTOMATED:

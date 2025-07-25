@@ -119,7 +119,7 @@ def display_options(options, project_name, checker):
         if optimization_flags:
             print(f"Optimization build flags: {', '.join(optimization_flags)}")
 
-    print("\n========================================\n")
+    print("\n========================================")
 
 
 def parse_test_options(test_options_str, available_options, project_name, checker):

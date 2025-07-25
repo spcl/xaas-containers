@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import json
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import DeployConfig, RunConfig, SourceContainerConfig, SourceDeploymentConfig
 from xaas.config import XaaSConfig
 from xaas.docker import Runner as DockerRunner
+import xaas.source.utils as utils
 
 
 def initialize():
@@ -50,14 +52,37 @@ def source_container(config) -> None:
     action.generate()
 
 
+@source.command("specializations")
+@click.argument("app-name", type=str)
+@click.argument("system-discovery", type=click.Path(exists=True))
+@click.option("--verbose", is_flag=True, default=False, help="Enable debug output")
+def source_specialization(app_name, system_discovery, verbose) -> None:
+    initialize()
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, force=True)
+
+    with open(system_discovery) as f:
+        system_features = json.load(f)
+    _, options, checker = SourceContainerDeployment.intersect_specializations(
+        app_name, system_features
+    )
+    utils.display_options(options, app_name, checker)
+
+
 @source.command("deploy")
 @click.argument("config", type=click.Path(exists=True))
-def source_deploy(config) -> None:
+@click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
+@click.option("--verbose", is_flag=True, default=False, help="Enable debug output")
+def source_deploy(config, parallel_workers, verbose: bool) -> None:
     initialize()
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, force=True)
 
     config_obj = SourceDeploymentConfig.load(config)
     action = SourceContainerDeployment(config_obj)
-    action.generate()
+    action.generate(parallel_workers=parallel_workers)
 
 
 @cli.group()
