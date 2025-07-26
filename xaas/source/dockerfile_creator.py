@@ -229,8 +229,39 @@ class DockerfileCreator:
 
     def install_linear_algebra_lib(self, selected_specializations: dict):
         # FIXME: move this into separate dependencies
-        linear_algebra_libs = selected_specializations.get("linear_algebra_libraries", {})
+        linear_algebra_libs = self.selected_specializations.get("linear_algebra_libraries", {})
+        fft_libraries = self.selected_specializations.get("fft_libraries", {})
 
+        # True if MKL (GPU) or mkl (CPU) present in FFT OR Linear Algebra libs
+        mkl_already_installed = any(
+            lib in ["MKL (GPU)", "mkl (CPU)"] for lib in list(linear_algebra_libs.keys()) + list(fft_libraries.keys())
+        )
+
+        # Only install MKL if requested, but NOT already installed by FFT/other
+        if "MKL" in linear_algebra_libs and not mkl_already_installed:
+            mkl_install_commands = """
+            # Update package list and install dependencies
+            RUN apt update && apt install -y gpg-agent wget
+
+            # Add Intel oneAPI GPG key
+            RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+
+            # Add Intel oneAPI repository
+            RUN echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
+
+            # Update package list again
+            RUN apt update
+
+            # Install Intel MKL
+            RUN apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
+
+            # mkl has to be sourced to be recognized by gromacs
+            RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
+            """
+            self.dockerfile_content.append(mkl_install_commands.strip())
+            return
+
+        # Otherwise, install other linear algebra libraries as usual
         for lib in linear_algebra_libs.keys():
             if lib == "OpenBLAS":
                 openblas_install_commands = """
@@ -244,6 +275,7 @@ class DockerfileCreator:
                 RUN apt install -y libscalapack-mpi-dev
                 """
                 self.dockerfile_content.append(scalapack_install_commands.strip())
+            
 
     def copy_project_directory(self, project_directory):
         app_name = self.project_name
