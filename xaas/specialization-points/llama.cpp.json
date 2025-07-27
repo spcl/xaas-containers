@@ -6,71 +6,71 @@
     "gpu_backends": {
       "CUDA": {
         "used_as_default": false,
-        "build_flag": "-DGGML_USE_CUDA",
+        "build_flag": "-DGGML_CUDA",
         "minimum_version": null
       },
       "Vulkan": {
         "used_as_default": false,
-        "build_flag": "-DGGML_USE_VULKAN",
+        "build_flag": "-DGGML_VULKAN",
         "minimum_version": null
       },
       "HIP": {
         "used_as_default": false,
-        "build_flag": "-DGGML_USE_HIP",
+        "build_flag": "-DGGML_HIP",
         "minimum_version": null
       },
       "MUSA": {
         "used_as_default": false,
-        "build_flag": "-DGGML_USE_MUSA",
+        "build_flag": "-DGGML_MUSA",
         "minimum_version": null
       },
       "Metal": {
         "used_as_default": false,
-        "build_flag": "-DGGML_USE_METAL",
+        "build_flag": "-DGGML_METAL",
         "minimum_version": null
       }
     },
     "parallel_programming_libraries": {
       "OpenMP": {
         "used_as_default": true,
-        "build_flag": "-DGGML_USE_OPENMP",
+        "build_flag": "-DGGML_OPENMP",
         "minimum_version": null
       }
     },
     "linear_algebra_libraries": {
   "Accelerate": {
     "used_as_default": true,
-    "build_flag": "-DGGML_USE_ACCELERATE",
+    "build_flag": "-DGGML_ACCELERATE",
     "condition": "Darwin (macOS)"
   },
   "OpenBLAS": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_BLAS",
+    "build_flag": "-DGGML_BLAS",
     "condition": "if GGML_OPENBLAS is defined"
   },
   "OpenBLAS64": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_BLAS",
+    "build_flag": "-DGGML_BLAS",
     "condition": "if GGML_OPENBLAS64 is defined"
   },
   "BLIS": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_BLAS",
+    "build_flag": "-DGGML_BLAS",
     "condition": "if GGML_BLIS is defined"
   },
   "NVPL": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_BLAS",
+    "build_flag": "-DGGML_BLAS",
     "condition": "if GGML_NVPL is defined"
   },
   "MKL": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_BLAS",
+    "build_flag": "-DGGML_BLAS",
     "condition": "if MKL is detected"
   },
   "cuBLAS": {
     "used_as_default": false,
-    "build_flag": "-DGGML_USE_CUBLAS",
+    "build_flag": "-DGGML_CUBLAS",
     "condition": "if CUDA/cuBLAS is available"
   }
 },
