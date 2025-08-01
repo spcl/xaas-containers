@@ -3,6 +3,78 @@ import logging
 import inspect
 
 
+def install_mkl() -> str:
+    return inspect.cleandoc("""
+    # Update package list and install dependencies
+    RUN apt update && apt install -y gpg-agent wget
+    # Add Intel oneAPI GPG key
+    RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+    # Add Intel oneAPI repository
+    RUN echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
+    # Update package list again
+    RUN apt update
+    # Install Intel MKL
+    RUN apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
+    # mkl has to be sourced to be recognized by gromacs
+    RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
+    """)
+
+
+def install_cuda(cuda_version: str, repo_url: str) -> str:
+    return inspect.cleandoc(f"""
+    # Add CUDA repository key
+    RUN apt-key adv --fetch-keys {repo_url}3bf863cc.pub \\
+        && echo "deb {repo_url} /" > /etc/apt/sources.list.d/cuda.list \\
+        && apt-get update \\
+        && apt-get install -y --no-install-recommends \\
+            cuda-toolkit-{cuda_version}
+
+    # Set CUDA environment variables
+    ENV PATH="/usr/local/cuda-{cuda_version}/bin:$PATH"
+    ENV LD_LIBRARY_PATH="/usr/local/cuda-{cuda_version}/lib64:$LD_LIBRARY_PATH"
+
+    # NVIDIA runtime environment variables
+    ENV NVIDIA_VISIBLE_DEVICES all
+    ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
+    ENV NVIDIA_REQUIRE_CUDA "cuda>={cuda_version}"
+    """)
+
+
+def install_rocm(rocm_version: str) -> str:
+    return inspect.cleandoc(f"""
+    # Install ROCm stack
+    RUN apt update && apt install -y wget gnupg && \\
+        wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \\
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/{rocm_version}/ ubuntu main" > /etc/apt/sources.list.d/rocm.list && \\
+        apt update && \\
+        apt install -y rocm-dev rocblas rocfft rocm-llvm rocprim-dev && \\
+    rm -rf /var/lib/apt/lists/*
+    """)
+
+
+def install_rocfft(rocm_version: str) -> str:
+    return inspect.cleandoc("""
+    # Install rocFFT and dependencies
+    RUN apt update && \\
+        apt install -y rocfft && \\
+        rm -rf /var/lib/apt/lists/*
+    """)
+
+
+def install_openblas() -> str:
+    return inspect.cleandoc("""
+    RUN apt update
+    RUN apt install -y libopenblas-dev
+    """)
+
+
+def install_scalapack() -> str:
+    return inspect.cleandoc("""
+    RUN apt update
+    RUN apt install -y libscalapack-mpi-dev
+    """)
+
+
 class DockerfileCreator:
     def __init__(self, project_name: str, working_directory: str, cpu_architecture: str):
         self.project_name = project_name
@@ -12,7 +84,6 @@ class DockerfileCreator:
         self.architecture = cpu_architecture
 
     def create_source_dockerfile(self, project_directory: str) -> str:
-
         # source container
         self.add_base_image()
         self.copy_project_directory(project_directory)
@@ -33,7 +104,7 @@ class DockerfileCreator:
         return system_features.get("CPU Info", {}).get("Supported Vectorizations", [])
 
     def add_base_image(self):
-
+        # FIXME: change
         if self.architecture == "x86_64":
             base_image = "ealnuaimi/xaas:ubuntu20.04-mpich3.1.4-v1.1"
         elif self.architecture == "aarch64":
@@ -47,7 +118,6 @@ class DockerfileCreator:
         self.dockerfile_content.append(base_image_content.strip())
 
     def add_multistage_phase(self, source_image: str, base_image: str | None):
-
         base_image_content = f"""
         FROM {source_image} AS SOURCE
         """
@@ -70,7 +140,6 @@ class DockerfileCreator:
             self.install_fft_lib(selected_specializations, system_features)
 
     def install_gpu_backend(self, selected_specializations: dict):
-
         # FIXME: move this into separate dependencies
         gpu_backends = selected_specializations.get("gpu_backends", {})
 
@@ -93,26 +162,7 @@ class DockerfileCreator:
                 arch_key = arch_map.get(self.architecture, "x86_64")  # Default to x86_64 if unknown
                 repo_url = f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/{arch_key}/"
 
-                # CUDA installation commands (full version)
-                cuda_install_commands = f"""
-                # Add CUDA repository key
-                RUN apt-key adv --fetch-keys {repo_url}3bf863cc.pub \\
-                    && echo "deb {repo_url} /" > /etc/apt/sources.list.d/cuda.list \\
-                    && apt-get update \\
-                    && apt-get install -y --no-install-recommends \\
-                        cuda-toolkit-{cuda_version}
-
-                # Set CUDA environment variables
-                ENV PATH="/usr/local/cuda-{cuda_version}/bin:$PATH"
-                ENV LD_LIBRARY_PATH="/usr/local/cuda-{cuda_version}/lib64:$LD_LIBRARY_PATH"
-
-                # NVIDIA runtime environment variables
-                ENV NVIDIA_VISIBLE_DEVICES all
-                ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-                ENV NVIDIA_REQUIRE_CUDA "cuda>={cuda_version}"
-                """
-
-                self.dockerfile_content.append(cuda_install_commands.strip())
+                self.dockerfile_content.append(install_cuda(cuda_version, repo_url).strip())
 
             elif backend.lower in ["hip", "rocm"]:
                 rocm_version = config.get("version")
@@ -121,21 +171,9 @@ class DockerfileCreator:
                         "ROCm version is required but missing in selected_specializations."
                     )
 
-                # ROCm installation commands
-                rocm_install_commands = f"""
-                # Install ROCm stack
-                RUN apt update && apt install -y wget gnupg && \\
-                    wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \\
-                    echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/{rocm_version}/ ubuntu main" > /etc/apt/sources.list.d/rocm.list && \\
-                    apt update && \\
-                    apt install -y rocm-dev rocblas rocfft rocm-llvm rocprim-dev && \\
-                rm -rf /var/lib/apt/lists/*
-            """
-
-                self.dockerfile_content.append(rocm_install_commands.strip())
+                self.dockerfile_content.append(install_rocm(rocm_version).strip())
 
     def install_fft_lib(self, selected_specializations: dict, system_features: dict):
-
         # FIXME: move this into separate dependencies
         # mkl source command might be incomplete
 
@@ -144,38 +182,13 @@ class DockerfileCreator:
         # Prioritize MKL if present
         for fft_lib in fft_libraries.keys():
             if fft_lib in ["MKL (GPU)", "mkl (CPU)"]:
-                mkl_install_commands = """
-                # Update package list and install dependencies
-                RUN apt update && apt install -y gpg-agent wget
-
-                # Add Intel oneAPI GPG key
-                RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-
-                # Add Intel oneAPI repository
-                RUN echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
-
-                # Update package list again
-                RUN apt update
-
-                # Install Intel MKL
-                RUN apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
-
-                # mkl has to be sourced to be recognized by gromacs
-                RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
-                """
-                self.dockerfile_content.append(mkl_install_commands.strip())
+                self.dockerfile_content.append(install_mkl().strip())
                 return  # Stop here, don't install FFTW if MKL is chosen
 
         # Install rocFFT if explicitly selected
         for fft_lib in fft_libraries.keys():
             if fft_lib.lower() == "rocfft":
-                rocfft_install_commands = """
-                # Install rocFFT and dependencies
-                RUN apt update && \\
-                    apt install -y rocfft && \\
-                    rm -rf /var/lib/apt/lists/*
-                """
-                self.dockerfile_content.append(rocfft_install_commands.strip())
+                self.dockerfile_content.append(install_rocfft.strip())
                 return  # Only one FFT library should be installed
 
         # If MKL is not selected, check for FFTW
@@ -229,53 +242,26 @@ class DockerfileCreator:
 
     def install_linear_algebra_lib(self, selected_specializations: dict):
         # FIXME: move this into separate dependencies
-        linear_algebra_libs = self.selected_specializations.get("linear_algebra_libraries", {})
-        fft_libraries = self.selected_specializations.get("fft_libraries", {})
+        linear_algebra_libs = selected_specializations.get("linear_algebra_libraries", {})
+        fft_libraries = selected_specializations.get("fft_libraries", {})
 
         # True if MKL (GPU) or mkl (CPU) present in FFT OR Linear Algebra libs
         mkl_already_installed = any(
-            lib in ["MKL (GPU)", "mkl (CPU)"] for lib in list(linear_algebra_libs.keys()) + list(fft_libraries.keys())
+            lib in ["MKL (GPU)", "mkl (CPU)"]
+            for lib in list(linear_algebra_libs.keys()) + list(fft_libraries.keys())
         )
 
         # Only install MKL if requested, but NOT already installed by FFT/other
         if "MKL" in linear_algebra_libs and not mkl_already_installed:
-            mkl_install_commands = """
-            # Update package list and install dependencies
-            RUN apt update && apt install -y gpg-agent wget
-
-            # Add Intel oneAPI GPG key
-            RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
-
-            # Add Intel oneAPI repository
-            RUN echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list
-
-            # Update package list again
-            RUN apt update
-
-            # Install Intel MKL
-            RUN apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
-
-            # mkl has to be sourced to be recognized by gromacs
-            RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
-            """
-            self.dockerfile_content.append(mkl_install_commands.strip())
+            self.dockerfile_content.append(install_mkl().strip())
             return
 
         # Otherwise, install other linear algebra libraries as usual
         for lib in linear_algebra_libs.keys():
             if lib == "OpenBLAS":
-                openblas_install_commands = """
-                RUN apt update
-                RUN apt install -y libopenblas-dev
-                """
-                self.dockerfile_content.append(openblas_install_commands.strip())
+                self.dockerfile_content.append(install_openblas().strip())
             elif lib == "ScaLAPACK":
-                scalapack_install_commands = """
-                RUN apt update
-                RUN apt install -y libscalapack-mpi-dev
-                """
-                self.dockerfile_content.append(scalapack_install_commands.strip())
-            
+                self.dockerfile_content.append(install_scalapack().strip())
 
     def copy_project_directory(self, project_directory):
         app_name = self.project_name
@@ -288,7 +274,6 @@ class DockerfileCreator:
         self.dockerfile_content.append(content.strip())
 
     def copy_from_first_build_stage(self, has_different_build_image: bool):
-
         if has_different_build_image:
             content = inspect.cleandoc(
                 """
@@ -315,7 +300,6 @@ class DockerfileCreator:
         source_image: str,
         deployment_base_image: str | None,
     ):
-
         # multi-stage build (deployment))
         self.add_multistage_phase(source_image, deployment_base_image)
         self.add_build_args()

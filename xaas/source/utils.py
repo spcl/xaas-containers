@@ -5,11 +5,10 @@ import re
 
 # All the helper functions that are used in run.py are here
 
-from xaas.config import SourceContainerMode
+from xaas.config import ConfigSelection
 
 
 def get_kokkos_arch(system_features):
-
     # Define known mappings for Kokkos architectures
     kokkos_cpu_arch_map = {
         "Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz": "-DKokkos_ARCH_SKX=ON",
@@ -58,7 +57,6 @@ def get_kokkos_arch(system_features):
 
 # This is for llama.cpp
 def get_cuda_architecture_flag(system_features):
-
     gpu_info_list = (
         system_features.get("Accelerators", {}).get("Accelerators", {}).get("nvidia", [])
     )
@@ -84,13 +82,11 @@ def debug_print(message, debug_enabled):
 
 
 def load_specialization_points(project_name) -> dict:
-
     dir_path = os.path.dirname(os.path.realpath(__file__))
 
     file_path = Path(
         os.path.join(dir_path, os.path.pardir, "specialization-points", f"{project_name}.json")
     )
-    print(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Specialization points file for {project_name} not found.")
     with open(file_path, "r") as f:
@@ -98,7 +94,6 @@ def load_specialization_points(project_name) -> dict:
 
 
 def display_options(options, project_name, checker):
-
     print("\n=== Available Specialization Options ===")
 
     for category, choices in options.items():
@@ -210,13 +205,7 @@ def select_option(category, choices, selected_options, allow_multiple=False, max
 
 # if user select MKL/oneAPI MKL as FFT, then MKL is chosen as default linear algebra library
 # For vpic-kokkos and llama.cpp, let user choose fine-tuning options from optimization_build_flags
-def get_user_choices(
-    checker, options, project_name, system_features, mode: SourceContainerMode, test_options_str=""
-) -> dict:
-    if mode == SourceContainerMode.PREDEFINED:
-        display_options(options, project_name, checker)
-        return parse_test_options(test_options_str, options, project_name, checker)
-
+def get_user_choices(checker, options, project_name, system_features) -> dict:
     selected_options = {
         "vectorization_flags": [] if project_name in ["milc", "openqcd"] else {},
         "gpu_backends": {},
@@ -224,6 +213,7 @@ def get_user_choices(
         "fft_libraries": {},
         "linear_algebra_libraries": {},
         "optimization_build_flags": [],
+        "compiler": {},
     }
 
     # **Sort vectorization flags in order before presenting them**
@@ -360,7 +350,7 @@ def get_user_choices(
 
 
 # For cmake files
-def extract_build_flags(selected_specializations, specialization_points):
+def extract_cmake_build_flags(selected_specializations: ConfigSelection, specialization_points):
     """Extracts build flags from the selected specializations."""
     build_flags = []
 
@@ -379,7 +369,12 @@ def extract_build_flags(selected_specializations, specialization_points):
     cpu_fft_flag = None  # Stores -DGMX_FFT_LIBRARY flag
     gpu_fft_flag = None  # Stores -DGMX_GPU_FFT_LIBRARY flag
 
+    # for category_name, category in selected_specializations.items():
+    print("Specialization points selected", specialization_points)
     for category_name, category in selected_specializations.items():
+        if category_name == "compiler":
+            continue
+
         if isinstance(category, dict):
             for key, value in category.items():
                 json_key = normalization_map.get(key, key)  # Normalize keys
@@ -415,6 +410,20 @@ def extract_build_flags(selected_specializations, specialization_points):
                 if "=" not in flag:
                     flag += "=ON"
                 build_flags.append(flag)
+
+    # set compiler
+    compilers = selected_specializations["compiler"]
+    assert len(compilers) == 1, "Only one compiler should be selected."
+    compiler, flags = next(iter(compilers.items()))
+    if flags["build_flag"]:
+        build_flags.append(flags["build_flag"])
+    else:
+        if flags["language"] == "c":
+            build_flags.append(f"-DCMAKE_C_COMPILER={compiler}")
+        elif flags["language"] == "cxx":
+            build_flags.append(f"-DCMAKE_CXX_COMPILER={compiler}")
+        else:
+            build_flags.append(f"-DCMAKE_Fortran_COMPILER={compiler}")
 
     # Ensure internal library flags are correctly appended
     if internal_library and any(

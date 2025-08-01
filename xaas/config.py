@@ -31,6 +31,11 @@ class SourceContainerAutomated(Enum):
     GEMINI = "gemini"
 
 
+class Language(str, Enum):
+    CXX = "cxx"
+    FORTRAN = "fortran"
+
+
 @dataclass
 class DockerLayerVersion(DataClassYAMLMixin):
     flag_name: str
@@ -230,11 +235,21 @@ class SourceDeploymentConfigSystem(DataClassYAMLMixin):
 
 
 @dataclass
+class ConfigSelection(DataClassYAMLMixin):
+    vectorization: str
+    gpu_backend: str
+    parallel_library: str
+    fft_library: str
+    blas_lapack_library: str
+    compiler: str
+
+
+@dataclass
 class SourceDeploymentConfigMode(DataClassYAMLMixin):
     mode: SourceContainerMode
     # FIXME: remove that - replace with mode
-    predefined_config_string: str | None
-    predefined_mode: dict[str, str] | None = None
+    # predefined_config_string: str | None
+    predefined_config: ConfigSelection | None = None
     automated_mode: SourceContainerAutomated | None = None
 
 
@@ -243,6 +258,7 @@ class SourceDeploymentConfig(DataClassYAMLMixin):
     source_container: str
     working_directory: str
     project_name: str
+    language: Language
     system: SourceDeploymentConfigSystem
     mode: SourceDeploymentConfigMode
     docker_repository: str = "spcleth/xaas-artifact"

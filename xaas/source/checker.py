@@ -1,6 +1,8 @@
 import json
 import re
 
+from xaas.config import Language
+
 
 class Checker:
     def __init__(self, specialization_points, system_features):
@@ -85,7 +87,6 @@ class Checker:
 
     # comeplete
     def get_gpu_backend(self):
-
         if not self.specialization_points.get("gpu_build", {}).get("value", False):
             return {}
 
@@ -173,7 +174,6 @@ class Checker:
 
     # compelete
     def find_fft_libraries(self):
-
         # if intel-oneapi-mkl is on the system, list all MKL and oneAPI options as oneAPI is backward comptable
         # if intel-mkl is on the system, consider MKL options only
         # this was cutomized for the gromacs app
@@ -336,13 +336,32 @@ class Checker:
         return la_results
 
     # complete
-    def perform_check(self):
+    def perform_check(self, app_language: Language):
         return {
             "vectorization_flags": self.get_vectorization_flags(),
             "gpu_backends": self.get_gpu_backend(),
             "parallel_libraries": self.get_parallel_libraries(),
             "fft_libraries": self.find_fft_libraries(),
             "linear_algebra_libraries": self.find_linear_algebra_libraries(),
+            "compiler": self.map_compiler(app_language),
+        }
+
+    def map_compiler(self, app_language: Language) -> dict:
+        # special handling for compilers
+        # these are not specified by the app
+        system_compilers = self.system_features["Compilers"][app_language.value]
+
+        # currently, all compilers are available in PATH - no need to find paths
+        # we map compiler name to itself
+        # if we ever need to support custom paths, then we need to change it here
+        return {
+            key: {
+                "build_flag": None,
+                "version": "default",
+                "used_as_default": "False",
+                "language": app_language.value,
+            }
+            for key, _ in system_compilers.items()
         }
 
     def find_mandatory_installations(self):
@@ -357,4 +376,3 @@ class Checker:
 
     def get_optimization_build_flags(self):
         return self.specialization_points.get("optimization_build_flags", [])
-

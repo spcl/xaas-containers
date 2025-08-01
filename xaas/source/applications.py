@@ -1,13 +1,14 @@
 import logging
 from enum import Enum
 from typing import Callable
+import inspect
 
 from xaas.source.gemini_interface import GeminiInterface
+from xaas.config import ConfigSelection
 import xaas.source.utils as utils
 
 
 class Application(str, Enum):
-
     GROMACS = "gromacs"
     MILC = "milc"
     OPENQCD = "openqcd"
@@ -19,26 +20,23 @@ class Application(str, Enum):
 
 
 class ApplicationSpecialization:
-
     def __init__(self, system_features: dict, gemini_interface: GeminiInterface | None):
-
         self._gemini_interface = gemini_interface
         self._system_features = system_features
 
-    def gromacs(self, selected_specializations: dict, specialization_points: dict) -> str:
+    def gromacs(
+        self, selected_specializations: ConfigSelection, specialization_points: dict
+    ) -> str:
         release_build = "-DCMAKE_BUILD_TYPE=Release "
-        build_flags_string = utils.extract_build_flags(
+        build_flags_string = utils.extract_cmake_build_flags(
             selected_specializations, specialization_points
         )
         build_flags_string = release_build + build_flags_string
 
-        if (
-            "fft_libraries" in selected_specializations
-            and "fftw3" in selected_specializations["fft_libraries"]
-        ):
+        if "fftw3" in selected_specializations["fft_libraries"]:
             build_flags_string = f" {build_flags_string} -DGMX_BUILD_OWN_FFTW=ON"
 
-        return f"""
+        return inspect.cleandoc(f"""
             RUN mkdir build \\
                 && cd build \\
                 && cmake .. {build_flags_string} \\
@@ -47,7 +45,7 @@ class ApplicationSpecialization:
                 && sudo make install \\
                 && source /usr/local/gromacs/bin/GMXRC \\
                 && cd ../
-            """
+            """)
 
     def milc(self, selected_specializations: dict, specialization_points: dict) -> str:
         assert self._gemini_interface is not None, "Gemini interface is not initialized."
@@ -86,7 +84,7 @@ class ApplicationSpecialization:
     def vpic_kokkos(self, selected_specializations: dict, specialization_points: dict) -> str:
         cpu_arch, gpu_arch = utils.get_kokkos_arch(self._system_features)
         release_build = '-DCMAKE_BUILD_TYPE=Release  -DCMAKE_CXX_FLAGS="-rdynamic" '
-        build_flags_string = utils.extract_build_flags(
+        build_flags_string = utils.extract_cmake_build_flags(
             selected_specializations, specialization_points
         )
 
@@ -112,7 +110,7 @@ class ApplicationSpecialization:
         # for perfomance portability
         default_flag = "-DGGML_NATIVE=OFF "
 
-        build_flags_string = utils.extract_build_flags(
+        build_flags_string = utils.extract_cmake_build_flags(
             selected_specializations, specialization_points
         )
         logging.debug(f"Generated CMake build flags: {build_flags_string}")
@@ -137,27 +135,28 @@ class ApplicationSpecialization:
     def icon(self, selected_specializations: dict, specialization_points: dict) -> str:
         # FIXME: This is not functional
         # Not fully tested
-        build_flags_string = utils.extract_build_flags(
-            selected_specializations, specialization_points
-        )
-        return f"""
-            RUN ./configure {build_flags_string}
-            """
+        raise NotImplementedError("ICON application specialization is not fully functional yet.")
+        # build_flags_string = utils.extract_build_flags(
+        #    selected_specializations, specialization_points
+        # )
+        # return f"""
+        #    RUN ./configure {build_flags_string}
+        #    """
 
     def cloudsc(self, selected_specializations: dict, specialization_points: dict) -> str:
         # FIXME: This is not functional
         # Not fully tested
-        build_flags_string = utils.extract_build_flags(
-            selected_specializations, specialization_points
-        )
-        return f"""
-            RUN ./cloudsc-bundle create \\
-                && ./cloudsc-bundle build --build-type release --cloudsc-fortran=ON --cloudsc-c=ON --with-serialbox {build_flags_string}
-            """
+        raise NotImplementedError("ICON application specialization is not fully functional yet.")
+        # build_flags_string = utils.extract_build_flags(
+        #    selected_specializations, specialization_points
+        # )
+        # return f"""
+        #    RUN ./cloudsc-bundle create \\
+        #        && ./cloudsc-bundle build --build-type release --cloudsc-fortran=ON --cloudsc-c=ON --with-serialbox {build_flags_string}
+        #    """
 
 
 class ApplicationSpecializationBuilder:
-
     APPLICATIONS = {
         Application.GROMACS: ApplicationSpecialization.gromacs,
         Application.MILC: ApplicationSpecialization.milc,
