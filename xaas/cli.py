@@ -18,8 +18,14 @@ from xaas.actions.build import Config as BuildConfig
 from xaas.actions.cpu_tuning import CPUTuning
 from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
-from xaas.config import DeployConfig, RunConfig, SourceContainerConfig, SourceDeploymentConfig
-from xaas.config import XaaSConfig
+from xaas.config import (
+    DeployConfig,
+    RunConfig,
+    SourceContainerConfig,
+    SourceDeploymentConfig,
+    Language,
+    XaaSConfig,
+)
 from xaas.docker import Runner as DockerRunner
 import xaas.source.utils as utils
 
@@ -54,9 +60,10 @@ def source_container(config) -> None:
 
 @source.command("specializations")
 @click.argument("app-name", type=str)
+@click.argument("app-language", type=str)
 @click.argument("system-discovery", type=click.Path(exists=True))
 @click.option("--verbose", is_flag=True, default=False, help="Enable debug output")
-def source_specialization(app_name, system_discovery, verbose) -> None:
+def source_specialization(app_name, app_language, system_discovery, verbose) -> None:
     initialize()
 
     if verbose:
@@ -65,7 +72,7 @@ def source_specialization(app_name, system_discovery, verbose) -> None:
     with open(system_discovery) as f:
         system_features = json.load(f)
     _, options, checker = SourceContainerDeployment.intersect_specializations(
-        app_name, system_features
+        app_name, Language(app_language), system_features
     )
     utils.display_options(options, app_name, checker)
 
