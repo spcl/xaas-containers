@@ -124,7 +124,6 @@ class Checker:
         # returns any other option that is not openmp and mpi
         specialization_libs = self.specialization_points.get("parallel_programming_libraries", {})
         system_libs = self.system_features.get("Parallel Libraries", {})
-        loaded_modules = self.system_features.get("Loaded Modules", {})
         known_mpi_variants = {"mpi", "mpich", "intel-oneapi-mpi", "openmpi", "roc-ompi/4.0.6rc4"}
 
         parallel_mapping = {}
@@ -138,12 +137,11 @@ class Checker:
                 }
             elif lib_name.lower() == "mpi":
                 installed_mpi_variant = next(
-                    (mod for mod in known_mpi_variants if mod in loaded_modules), None
+                    (mod for mod in known_mpi_variants if mod in system_libs), None
                 )
                 if installed_mpi_variant:
                     parallel_mapping[installed_mpi_variant] = {
                         "build_flag": specs.get("build_flag", "N/A"),
-                        "version": loaded_modules.get(installed_mpi_variant, "Unknown"),
                         "used_as_default": specs.get("used_as_default", False),
                         "library_name": installed_mpi_variant,
                     }

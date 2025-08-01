@@ -78,6 +78,9 @@ class SourceContainerDeployment:
             system_features = discover_system()
             logging.debug(f"Discovered system features: {system_features}")
 
+        # add mpich if does not exist - this is the default in our container
+        system_features["Parallel Libraries"]["mpich"] = {"libmpich.so": "container_default"}
+
         specialization_points, options, checker = self.intersect_specializations(
             self._config.project_name, self._config.language, system_features
         )
