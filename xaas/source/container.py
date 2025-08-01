@@ -67,7 +67,7 @@ class SourceContainerDeployment:
 
         return specialization_points, options, checker
 
-    def generate(self, parallel_workers: int):
+    def generate(self, parallel_workers: int, build: bool):
         application = Application(self._config.project_name)
 
         if self._config.system.system_discovery is not None:
@@ -114,7 +114,6 @@ class SourceContainerDeployment:
                 else:
                     if isinstance(selected_value, list):
                         for selection in selected_value:
-                            print(selection, options[key])
                             selected_options[key][selection] = options[key][selection]
                     else:
                         selected_options[key][selected_value] = options[key][selected_value]
@@ -132,19 +131,26 @@ class SourceContainerDeployment:
             self._config.working_directory,
             self._config.system.cpu_architecture,
         )
+        dockerfile_name = os.path.join(
+            self._config.working_directory, f"Dockerfile.deployment-{self._config.system.name}"
+        )
         dockerfile_creator.create_deployment_dockerfile(
             selected_options,
             system_features,
             build_command,
             self._config.source_container,
+            dockerfile_name,
             self._config.system.base_image,
         )
 
-        # image_name = f"{self._config.docker_repository}:{self._config.project_name}-source-deploy-{self._config.cpu_architecture}-{self._config.deployment_name}"
-        # logging.info(f"Building deployed Docker image: {image_name}")
-        # build_dir = os.path.join(self._config.working_directory, os.path.pardir)
-        # self._docker_runner.build(
-        #    dockerfile=os.path.join(self._config.working_directory, "Dockerfile.deployment"),
-        #    path=build_dir,
-        #    tag=image_name,
-        # )
+        if build:
+            image_name = f"{self._config.docker_repository}:{self._config.project_name}"
+            image_name += f"-source-deploy-{self._config.system.name}"
+            logging.info(f"Building deployed Docker image: {image_name} from {dockerfile_name}")
+            build_dir = os.path.join(self._config.working_directory, os.path.pardir)
+            self._docker_runner.build(
+                dockerfile=dockerfile_name,
+                path=build_dir,
+                tag=image_name,
+                build_args={"nproc": str(parallel_workers)},
+            )

@@ -227,11 +227,18 @@ class SourceContainerConfig(DataClassYAMLMixin):
 
 
 @dataclass
+class SourceDeploymentConfigBaseImage(DataClassYAMLMixin):
+    name: str
+    provided_features: list[str]
+    additional_commands: list[str]
+
+
+@dataclass
 class SourceDeploymentConfigSystem(DataClassYAMLMixin):
     name: str
     cpu_architecture: str = "x86_64"
     system_discovery: str | None = None
-    base_image: str | None = None
+    base_image: SourceDeploymentConfigBaseImage | None = None
 
 
 @dataclass
@@ -239,7 +246,7 @@ class ConfigSelection(DataClassYAMLMixin):
     vectorization_flags: str
     gpu_backends: str
     parallel_libraries: list[str]
-    fft_libraries: str
+    fft_libraries: list[str]
     linear_algebra_libraries: str
     compiler: str
 
