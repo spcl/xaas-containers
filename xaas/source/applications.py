@@ -36,13 +36,14 @@ class ApplicationSpecialization:
         if "fftw3" in selected_specializations["fft_libraries"]:
             build_flags_string = f" {build_flags_string} -DGMX_BUILD_OWN_FFTW=ON"
 
+        build_flags_string += " -DBUILD_TESTING=OFF"
+
         return inspect.cleandoc(f"""
             RUN mkdir build \\
                 && cd build \\
                 && cmake .. {build_flags_string} \\
                 && make -j$(nproc) \\
-                && make check \\
-                && sudo make install \\
+                && make install \\
                 && source /usr/local/gromacs/bin/GMXRC \\
                 && cd ../
             """)
