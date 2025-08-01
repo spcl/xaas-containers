@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from collections import defaultdict
 
 from xaas.config import (
     SourceContainerConfig,
@@ -87,32 +88,34 @@ class SourceContainerDeployment:
             selected_options = self._gemini_interface.select_options(
                 options, self._config.project_name
             )
-            ## integration with the old interface
-            # selected_specializations = ConfigSelection(
-            #    vectorization=selected_options["vectorization_flags"],
-            #    gpu_backend=selected_options["gpu_backends"],
-            #    parallel_library=selected_options["parallel_libraries"],
-            #    blas_lapack_library=selected_options["linear_algebra_libraries"],
-            #    fft_library=selected_options["fft_libraries"],
-            #    compiler=selected_options["compiler"],
-            # )
         elif self._config.mode.mode == SourceContainerMode.INTERACTIVE:
             selected_options = utils.get_user_choices(
                 checker, options, self._config.project_name, system_features
             )
             logging.debug(f"Selected specializations: {selected_options}")
-            ## integration with the old interface
-            # selected_specializations = ConfigSelection(
-            #    vectorization=selected_options["vectorization_flags"],
-            #    gpu_backend=selected_options["gpu_backends"],
-            #    parallel_library=selected_options["parallel_libraries"],
-            #    blas_lapack_library=selected_options["linear_algebra_libraries"],
-            #    fft_library=selected_options["fft_libraries"],
-            #    compiler=selected_options["compiler"],
-            # )
         elif self._config.mode.mode == SourceContainerMode.PREDEFINED:
-            pass
             # selected_specializations = self._config.mode.predefined_config
+            # integration with the old interface
+            selected_options = defaultdict(dict)
+            for key in [
+                "vectorization_flags",
+                "gpu_backends",
+                "parallel_libraries",
+                "fft_libraries",
+                "linear_algebra_libraries",
+                "compiler",
+            ]:
+                selected_value = getattr(self._config.mode.predefined_config, key)
+                if selected_value == "none":
+                    selected_options[key] = {}
+                else:
+                    if isinstance(selected_value, list):
+                        for selection in selected_value:
+                            print(selection, options[key])
+                            selected_options[key][selection] = options[key][selection]
+                    else:
+                        selected_options[key][selected_value] = options[key][selected_value]
+
         else:
             raise RuntimeError(f"Unsupported mode: {self._config.mode}")
 

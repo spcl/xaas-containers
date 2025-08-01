@@ -236,11 +236,11 @@ class SourceDeploymentConfigSystem(DataClassYAMLMixin):
 
 @dataclass
 class ConfigSelection(DataClassYAMLMixin):
-    vectorization: str
-    gpu_backend: str
-    parallel_library: str
-    fft_library: str
-    blas_lapack_library: str
+    vectorization_flags: str
+    gpu_backends: str
+    parallel_libraries: list[str]
+    fft_libraries: str
+    linear_algebra_libraries: str
     compiler: str
 
 
