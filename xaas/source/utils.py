@@ -354,9 +354,6 @@ def extract_cmake_build_flags(selected_specializations: ConfigSelection, special
     """Extracts build flags from the selected specializations."""
     build_flags = []
 
-    # Mapping user-friendly names back to their actual JSON keys
-    normalization_map = {"mkl (CPU)": "mkl", "MKL (GPU)": "MKL"}
-
     internal_library = specialization_points.get("internal_build", {}).get("library_name", None)
     internal_build_flag = specialization_points.get("internal_build", {}).get("build_flag", None)
 
@@ -366,35 +363,14 @@ def extract_cmake_build_flags(selected_specializations: ConfigSelection, special
             internal_build_flag += "=ON"
         build_flags.insert(0, internal_build_flag)
 
-    cpu_fft_flag = None  # Stores -DGMX_FFT_LIBRARY flag
-    gpu_fft_flag = None  # Stores -DGMX_GPU_FFT_LIBRARY flag
-
-    # for category_name, category in selected_specializations.items():
     print("Specialization points selected", specialization_points)
     for category_name, category in selected_specializations.items():
         if category_name == "compiler":
             continue
 
         if isinstance(category, dict):
-            for key, value in category.items():
-                json_key = normalization_map.get(key, key)  # Normalize keys
-
-                if json_key in specialization_points and isinstance(
-                    specialization_points[json_key], dict
-                ):
-                    flag = specialization_points[json_key].get("build_flag", None)
-                    if flag:
-                        # Assign CPU vs GPU FFT flags properly
-                        if key == "mkl (CPU)":
-                            cpu_fft_flag = "-DGMX_FFT_LIBRARY=mkl"
-                        elif key == "MKL (GPU)":
-                            gpu_fft_flag = "-DGMX_GPU_FFT_LIBRARY=MKL"
-                        else:
-                            if "=" not in flag:
-                                flag += "=ON"
-                            build_flags.append(flag)
-
-                elif isinstance(value, dict) and "build_flag" in value and value["build_flag"]:
+            for value in category.values():
+                if isinstance(value, dict) and "build_flag" in value and value["build_flag"]:
                     flag = value["build_flag"]
                     if "=" not in flag:
                         flag += "=ON"
@@ -434,11 +410,5 @@ def extract_cmake_build_flags(selected_specializations: ConfigSelection, special
             if "=" not in internal_build_flag:
                 internal_build_flag += "=ON"
             build_flags.append(internal_build_flag)
-
-    # Append FFT flags **at the end** to prevent overwriting
-    if cpu_fft_flag:
-        build_flags.append(cpu_fft_flag)
-    if gpu_fft_flag:
-        build_flags.append(gpu_fft_flag)
 
     return " ".join(build_flags)

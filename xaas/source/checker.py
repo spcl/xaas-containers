@@ -158,7 +158,8 @@ class Checker:
     def normalize_library_name(self, lib_name):
         normalized_name = re.sub(r"\[.*?\]|\s+", "", lib_name).lower()
         mapping = {
-            "mkl/onemkl": ["MKL", "oneMKL"],
+            "mkl": ["mkl", "MKL"],
+            "mkl/onemkl": ["MKL", "oneMKL", "mkl", "onemkl"],
             "blas/lapack": ["BLAS", "LAPACK"],
             "openblas": ["OpenBLAS"],
             "cublas": ["cuBLAS"],
@@ -170,17 +171,15 @@ class Checker:
             return ["internal"]
         return [lib_name]
 
-    # compelete
     def find_fft_libraries(self):
         # if intel-oneapi-mkl is on the system, list all MKL and oneAPI options as oneAPI is backward comptable
         # if intel-mkl is on the system, consider MKL options only
-        # this was cutomized for the gromacs app
         # oneMath is not oneAPI (we don't check for oneMath)
         # if CUDA backend is found, that mean cuFFT exists
 
         build_fft_libs = self.specialization_points.get("FFT_libraries", {})
         system_fft_libs = self.system_features.get("FFT Libraries", {})
-        loaded_modules = self.system_features.get("Loaded Modules", {})
+        # loaded_modules = self.system_features.get("Loaded Modules", {})
 
         # Normalize system FFT libraries
         normalized_system_libs = {}
@@ -189,8 +188,8 @@ class Checker:
                 normalized_system_libs[norm_name] = v
 
         # Detect installed MKL/oneMKL
-        oneapi_installed = "intel-oneapi-mkl" in loaded_modules
-        intel_mkl_installed = "intel-mkl" in loaded_modules
+        # oneapi_installed = "intel-oneapi-mkl" in loaded_modules
+        # intel_mkl_installed = "intel-mkl" in loaded_modules
 
         fft_results = {}
         for lib_name, build_info in build_fft_libs.items():
@@ -202,44 +201,11 @@ class Checker:
                 ):
                     system_info = normalized_system_libs.get(normalized_lib_name, {})
                     version = system_info.get("version", "Unknown")
-
-                    if normalized_lib_name in ["MKL", "mkl"]:
-                        if oneapi_installed:
-                            fft_results.update(
-                                {
-                                    "MKL (GPU)": {
-                                        "build_flag": "-DGMX_GPU_FFT_LIBRARY=MKL",
-                                        "version": loaded_modules["intel-oneapi-mkl"],
-                                        "used_as_default": build_info.get("used_as_default", False),
-                                    },
-                                    "mkl (CPU)": {
-                                        "build_flag": "-DGMX_FFT_LIBRARY=mkl",
-                                        "version": loaded_modules["intel-oneapi-mkl"],
-                                        "used_as_default": build_info.get("used_as_default", False),
-                                    },
-                                }
-                            )
-                        elif intel_mkl_installed:
-                            fft_results.update(
-                                {
-                                    "MKL (GPU)": {
-                                        "build_flag": "-DGMX_GPU_FFT_LIBRARY=MKL",
-                                        "version": loaded_modules["intel-mkl"],
-                                        "used_as_default": build_info.get("used_as_default", False),
-                                    },
-                                    "mkl (CPU)": {
-                                        "build_flag": "-DGMX_FFT_LIBRARY=mkl",
-                                        "version": loaded_modules["intel-mkl"],
-                                        "used_as_default": build_info.get("used_as_default", False),
-                                    },
-                                }
-                            )
-                    else:
-                        fft_results[lib_name] = {
-                            "build_flag": build_info.get("build_flag", "N/A"),
-                            "version": version,
-                            "used_as_default": build_info.get("used_as_default", False),
-                        }
+                    fft_results[lib_name] = {
+                        "build_flag": build_info.get("build_flag", "N/A"),
+                        "version": version,
+                        "used_as_default": build_info.get("used_as_default", False),
+                    }
                 elif build_info.get("built-in", False):
                     fft_results[lib_name] = {
                         "build_flag": build_info.get("build_flag", "N/A"),
@@ -248,6 +214,7 @@ class Checker:
                     }
 
         # Check for CUDA in GPU backends and add cuFFT if present
+        # Implicit inference of the existence
         gpu_backends = self.get_gpu_backend()
         if "CUDA" in gpu_backends:
             cufft_config = build_fft_libs.get("cuFFT", {})
@@ -284,6 +251,14 @@ class Checker:
                             "version": version,
                             "used_as_default": build_info.get("used_as_default", False),
                         }
+
+                    for sys_lib_name, system_info in system_la_libs.items():
+                        if sys_lib_name.lower() == "mkl":
+                            la_results["MKL"] = {
+                                "build_flag": build_info.get("build_flag", "N/A"),
+                                "version": version,
+                                "used_as_default": build_info.get("used_as_default", False),
+                            }
 
                 # Detect cuBLAS from CUDA backend info
                 elif normalized_lib_name.lower() == "cublas":
