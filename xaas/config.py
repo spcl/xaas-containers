@@ -247,7 +247,7 @@ class ConfigSelection(DataClassYAMLMixin):
     gpu_backends: str
     parallel_libraries: list[str]
     fft_libraries: list[str]
-    linear_algebra_libraries: str
+    linear_algebra_libraries: str | None
     compiler: str
 
 

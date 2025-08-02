@@ -80,7 +80,7 @@ def source_specialization(app_name, app_language, system_discovery, verbose) -> 
 @source.command("deploy")
 @click.argument("config", type=click.Path(exists=True))
 @click.option("--parallel-workers", type=int, default=1, help="Parallel wokers")
-@click.option("--build", is_flag=True, default=True, help="Build image immediately")
+@click.option("--build/--no-build", is_flag=True, default=True, help="Build image immediately")
 @click.option("--verbose", is_flag=True, default=False, help="Enable debug output")
 def source_deploy(config, parallel_workers, build: bool, verbose: bool) -> None:
     initialize()

@@ -167,7 +167,6 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         gpu_backends = selected_specializations.get("gpu_backends", {})
 
         for backend, config in gpu_backends.items():
-            print("GPU", backend)
             if backend.lower() == "cuda":  # Case-insensitive check for CUDA
                 cuda_version = config.get("version")
 
@@ -229,7 +228,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         for fft_lib, config in fft_libraries.items():
             if fft_lib.lower() in ["fftw", "fftw3"]:
                 if config.get("used_as_default", False):
-                    print(f"Skipping installation of {fft_lib} (used as default).")
+                    logging.info(f"Skipping installation of {fft_lib} (used as default).")
                     return
 
                 # Download and extract FFTW
@@ -281,10 +280,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         fft_libraries = selected_specializations.get("fft_libraries", {})
 
         # True if MKL (GPU) or mkl (CPU) present in FFT OR Linear Algebra libs
-        mkl_already_installed = any(
-            lib in ["MKL", "mkl"]
-            for lib in list(linear_algebra_libs.keys()) + list(fft_libraries.keys())
-        )
+        mkl_already_installed = any(lib in ["MKL", "mkl"] for lib in list(fft_libraries.keys()))
 
         # Only install MKL if requested, but NOT already installed by FFT/other
         if "MKL" in linear_algebra_libs and not mkl_already_installed:
@@ -292,7 +288,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
             return
 
         # Otherwise, install other linear algebra libraries as usual
-        for lib in linear_algebra_libs.keys():
+        for lib in linear_algebra_libs:
             if lib == "OpenBLAS":
                 self.dockerfile_content.append(install_openblas().strip())
             elif lib == "ScaLAPACK":

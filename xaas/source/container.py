@@ -109,7 +109,7 @@ class SourceContainerDeployment:
                 "compiler",
             ]:
                 selected_value = getattr(self._config.mode.predefined_config, key)
-                if selected_value == "none":
+                if selected_value is None:
                     selected_options[key] = {}
                 else:
                     if isinstance(selected_value, list):
