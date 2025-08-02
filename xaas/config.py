@@ -46,7 +46,8 @@ class DockerLayerVersion(DataClassYAMLMixin):
 class DockerLayer(DataClassYAMLMixin):
     dockerfile: str
     name: str
-    version: str
+    versions: list[str]
+    version_arg: str
     build_location: str
     runtime_location: str
     arg_mapping: dict[str, DockerLayerVersion] | None = None
@@ -120,6 +121,7 @@ class FeatureType(Enum):
     OPENMP = "OPENMP"
     MPI = "MPI"
     CUDA = "CUDA"
+    ONEAPI = "ONEAPI"
 
 
 class FeatureSelectionType(Enum):

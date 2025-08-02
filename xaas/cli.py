@@ -20,6 +20,7 @@ from xaas.actions.deployment import Deployment
 from xaas.actions.preprocess import ClangPreprocesser, PreprocessingResult
 from xaas.config import (
     DeployConfig,
+    FeatureType,
     RunConfig,
     SourceContainerConfig,
     SourceDeploymentConfig,
@@ -259,9 +260,95 @@ def deploy(config, parallel_workers) -> None:
     action.execute(config_obj)
 
 
+@cli.command("build-layers")
+@click.argument("dep_name", type=str)
+@click.option("--version", type=str, default=None)
+def build_layers(dep_name: str, version: str | None) -> None:
+    initialize()
+
+    DOCKERFILES_DIR = os.path.join(Path(__file__).parent.parent, "dockerfiles")
+
+    dependency = FeatureType(dep_name.upper())
+
+    if dependency not in XaaSConfig().layers.layers:
+        raise ValueError(f"Dependency {dep_name} not found in configuration.")
+
+    dep_config = XaaSConfig().layers.layers[dependency]
+
+    docker_runner = DockerRunner(XaaSConfig().docker_repository)
+
+    if dep_config.arg_mapping:
+        versions = dep_config.versions
+        if version is not None:
+            versions = [version]
+
+        for version in versions:
+            for _, flag_config in dep_config.arg_mapping.items():
+                # if the argument is the version, then we don't need to iterate across all values
+                # since we will iterate over the version.
+                if flag_config.flag_name == dep_config.version_arg:
+                    name = dep_config.name.replace(f"${{{flag_config.flag_name}}}", version)
+
+                    build_args = {flag_config.flag_name: flag_config.build_args[version]}
+
+                    dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+                    logging.info(
+                        f"Building layer {name} with Dockerfile {dockerfile}, arguments {build_args}"
+                    )
+                    print(
+                        docker_runner.build(
+                            dockerfile=dockerfile,
+                            path=os.path.curdir,
+                            tag=f"{XaaSConfig().docker_repository}:{name}",
+                            build_args=build_args,
+                        )
+                    )
+
+                # non-version argument, iterate over all values
+                else:
+                    for flag_value, build_arg in flag_config.build_args.items():
+                        name = dep_config.name.replace("${version}", version)
+                        name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+
+                        build_args = {flag_config.flag_name: build_arg}
+
+                        dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+                        logging.info(
+                            f"Building layer {name} with Dockerfile {dockerfile}, arguments {build_args}"
+                        )
+                        print(
+                            docker_runner.build(
+                                dockerfile=dockerfile,
+                                path=os.path.curdir,
+                                tag=f"{XaaSConfig().docker_repository}:{name}",
+                                build_args=build_args,
+                            )
+                        )
+
+    else:
+        versions = dep_config.versions
+        if version is not None:
+            versions = [version]
+
+        for version in versions:
+            name = dep_config.name.replace("${version}", version)
+
+            build_args = {dep_config.version_arg: version}
+
+            dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+            logging.info(f"Building layer {name} with Dockerfile {dockerfile}")
+            docker_runner.build(
+                dockerfile=dockerfile,
+                path=os.path.curdir,
+                tag=f"{XaaSConfig().docker_repository}:{name}",
+                build_args=build_args,
+            )
+
+
 @cli.command("build-deps")
 @click.argument("dep_name", type=str)
-def build_deps(dep_name: str) -> None:
+@click.argument("version", type=str, default=None)
+def build_deps(dep_name: str, version: str | None) -> None:
     initialize()
 
     DOCKERFILES_DIR = os.path.join(Path(__file__).parent.parent, "dockerfiles")
@@ -270,30 +357,32 @@ def build_deps(dep_name: str) -> None:
         raise ValueError(f"Dependency {dep_name} not found in configuration.")
 
     dep_config = XaaSConfig().layers.layers_deps[dep_name]
-    print(dep_config)
 
     docker_runner = DockerRunner(XaaSConfig().docker_repository)
 
     if dep_config.arg_mapping:
         for _, flag_config in dep_config.arg_mapping.items():
             for flag_value, build_arg in flag_config.build_args.items():
-                name = dep_config.name.replace("${version}", dep_config.version)
-                print(name, flag_config.flag_name, flag_value)
-                name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+                versions = dep_config.versions
+                if version is not None:
+                    versions = [version]
 
-                build_args = {flag_config.flag_name: build_arg}
+                # FIXME: proper build arg for version
+                for version in versions:
+                    name = dep_config.name.replace("${version}", version)
+                    name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
 
-                print(name, build_args)
+                    build_args = {flag_config.flag_name: build_arg}
 
-                dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
-                print(
-                    docker_runner.build(
-                        dockerfile=dockerfile,
-                        path=os.path.curdir,
-                        tag=f"{XaaSConfig().docker_repository}:{name}",
-                        build_args=build_args,
+                    dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
+                    print(
+                        docker_runner.build(
+                            dockerfile=dockerfile,
+                            path=os.path.curdir,
+                            tag=f"{XaaSConfig().docker_repository}:{name}",
+                            build_args=build_args,
+                        )
                     )
-                )
 
 
 def main() -> None:

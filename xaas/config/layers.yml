@@ -1,21 +1,37 @@
 layers:
   MPI:
     dockerfile: Dockerfile.mpich
-    version: 4.3.0
+    versions: [4.3.0]
     name: mpich
+    version_arg: MPICH_VERSION
     build_location: /opt/mpich
     runtime_location: /opt/mpich
   CUDA:
     dockerfile: Dockerfile.cuda
     name: cuda-${version}
-    version: 12.8
+    versions: [12.1, 12.8]
+    version_arg: CUDA_VERSION
     build_location: /usr/local/cuda-${version}
     runtime_location: /usr/local/cuda-${version}
+  ONEAPI:
+    dockerfile: Dockerfile.oneapi
+    name: oneapi-${ONEAPI_VERSION}
+    versions: [2021.3.0, 2025.0]
+    version_arg: ONEAPI_VERSION
+    build_location: /opt/intel
+    runtime_location: /opt/intel
+    arg_mapping:
+      ONEAPI_VERSION:
+        flag_name: ONEAPI_VERSION
+        build_args:
+          2021.3.0: intel-basekit-2021.3.0
+          2025.0: intel-oneapi-base-toolkit-2025.0
 layers_deps:
   fftw3:
     dockerfile: deps/Dockerfile.fftw
     name: deps-fftw3-${version}-${SIMD_FLAG}
-    version: 3.3.10
+    versions: [3.3.10]
+    version_arg: FFTW3_VERSION
     arg_mapping:
       VECTORIZATION:
         flag_name: SIMD_FLAG
