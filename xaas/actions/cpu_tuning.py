@@ -25,7 +25,7 @@ from xaas.actions.analyze import (
     ProjectDivergence,
 )
 from xaas.actions.preprocess import PreprocessingResult, ProcessedResults
-from xaas.actions.docker import VolumeMount
+from xaas.docker import VolumeMount
 
 from concurrent.futures import ThreadPoolExecutor, as_completed, process
 
@@ -209,8 +209,8 @@ class CPUTuning(Action):
                                 raise RuntimeError(f"Unknown flag: {elem} in {new_flags}!")
                     else:
                         """
-                            If CPU tuning flags are the same as baseline project,
-                            then we just copy it over.
+                        If CPU tuning flags are the same as baseline project,
+                        then we just copy it over.
                         """
                         project_status.cpu_tuning = baseline_flags
 

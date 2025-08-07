@@ -1,0 +1,174 @@
+{
+  "gpu_build": {
+    "value": true,
+    "build_flag": null
+  },
+  "gpu_backends": {
+    "CUDA": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_CUDA",
+      "minimum_version": null
+    },
+    "SYCL": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_SYCL",
+      "minimum_version": null
+    },
+    "Vulkan": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_VULKAN",
+      "minimum_version": null
+    },
+    "HIP": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_HIP",
+      "minimum_version": null
+    },
+    "MUSA": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_MUSA",
+      "minimum_version": null
+    },
+    "Metal": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_METAL",
+      "minimum_version": null
+    }
+  },
+  "parallel_programming_libraries": {
+    "OpenMP": {
+      "used_as_default": true,
+      "build_flag": "-DGGML_OPENMP",
+      "minimum_version": null
+    }
+  },
+  "linear_algebra_libraries": {
+    "Accelerate": {
+      "used_as_default": true,
+      "build_flag": "-DGGML_ACCELERATE",
+      "condition": "Darwin (macOS)"
+    },
+    "OpenBLAS": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS",
+      "condition": "if GGML_OPENBLAS is defined"
+    },
+    "BLIS": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=FLAME",
+      "condition": "if GGML_BLIS is defined"
+    },
+    "MKL": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Intel10_64lp",
+      "condition": "if MKL is detected"
+    },
+    "cuBLAS": {
+      "used_as_default": false,
+      "build_flag": "-DGGML_CUDA_FORCE_CUBLAS",
+      "condition": "if CUDA/cuBLAS is available"
+    }
+  },
+  "FFT_libraries": {},
+  "other_external_libraries": {
+    "libcurl": {
+      "version": null,
+      "used_as_default": false,
+      "conditions": "if LLAMA_CURL is defined",
+      "build_flag": "-DLLAMA_USE_CURL"
+    }
+  },
+  "compiler_flags": [
+    "-Wall",
+    "-Wextra",
+    "-Wpedantic",
+    "-Wcast-qual",
+    "-Wno-unused-function",
+    "-Wshadow",
+    "-Wstrict-prototypes",
+    "-Wpointer-arith",
+    "-Wmissing-prototypes",
+    "-Werror=implicit-int",
+    "-Werror=implicit-function-declaration",
+    "-Wmissing-declarations",
+    "-Wmissing-noreturn"
+  ],
+  "optimization_build_flags": [
+    "-O3",
+    "-funsafe-math-optimizations",
+    "-use_fast_math",
+    "-DGGML_CUDA_FORCE_MMQ",
+    "-DGGML_CUDA_FORCE_CUBLAS",
+    "-DGGML_CUDA_F16",
+    "-DGGML_CUDA_PEER_MAX_BATCH_SIZE",
+    "-DGGML_CUDA_FA_ALL_QUANTS"
+  ],
+  "compilers": {},
+  "architectures": [
+    "x86_64",
+    "i686",
+    "amd64",
+    "aarch64",
+    "armv6%",
+    "armv7%",
+    "armv8%",
+    "ppc64%",
+    "ppc64le%",
+    "loongarch64%",
+    "riscv64%"
+  ],
+  "simd_vectorization": {
+    "AUTO": {
+      "build_flag": "-DGGML_NATIVE",
+      "default": true
+    },
+    "SSE4.2": {
+      "build_flag": "-DGGML_SSE42",
+      "default": false
+    },
+    "AVX": {
+      "build_flag": "-DGGML_AVX",
+      "default": false
+    },
+    "AVX2": {
+      "build_flag": "-DGGML_AVX2",
+      "default": false
+    },
+    "FMA": {
+      "build_flag": "-DGGML_FMA",
+      "default": false
+    },
+    "BMI2": {
+      "build_flag": "-DGGML_BMI2",
+      "default": false
+    },
+    "AVX_512": {
+      "build_flag": "-DGGML_AVX512",
+      "default": false
+    },
+    "AVX_512_VBMI": {
+      "build_flag": "-DGGML_AVX512_VBMI",
+      "default": false
+    },
+    "AVX_512_VNNI": {
+      "build_flag": "-DGGML_AVX512_VNNI",
+      "default": false
+    },
+    "AVX_512_BF16": {
+      "build_flag": "-DGGML_AVX512_BF16",
+      "default": false
+    },
+    "ALL": {
+      "build_flag": "-DGGML_CPU_ALL_VARIANTS",
+      "default": false
+    }
+  },
+  "build_system": {
+    "type": "cmake",
+    "minimum_version": "3.14"
+  },
+  "internal_build": {
+    "library_name": "ggml",
+    "build_flag": null
+  }
+}

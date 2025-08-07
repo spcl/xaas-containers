@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from dataclasses import field
 
 from xaas.actions.action import Action
-from xaas.actions.docker import VolumeMount
+from xaas.docker import VolumeMount
 from xaas.config import BuildResult
 from xaas.config import BuildSystem
 from xaas.config import FeatureType

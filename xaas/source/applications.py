@@ -1,0 +1,171 @@
+import logging
+from enum import Enum
+from typing import Callable
+import inspect
+
+from xaas.source.gemini_interface import GeminiInterface
+from xaas.config import ConfigSelection
+import xaas.source.utils as utils
+
+
+class Application(str, Enum):
+    GROMACS = "gromacs"
+    MILC = "milc"
+    OPENQCD = "openqcd"
+    Q_E = "q-e"
+    VPIC_KOKKOS = "vpic-kokkos"
+    LLAMMA_CPP = "llama.cpp"
+    ICON = "icon-model"
+    CLOUDSC = "cloudsc"
+
+
+class ApplicationSpecialization:
+    def __init__(self, system_features: dict, gemini_interface: GeminiInterface | None):
+        self._gemini_interface = gemini_interface
+        self._system_features = system_features
+
+    def gromacs(
+        self, selected_specializations: ConfigSelection, specialization_points: dict
+    ) -> str:
+        release_build = "-DCMAKE_BUILD_TYPE=Release "
+        build_flags_string = utils.extract_cmake_build_flags(
+            selected_specializations, specialization_points, self._system_features
+        )
+        build_flags_string = release_build + build_flags_string
+
+        if "fftw3" in selected_specializations["fft_libraries"]:
+            build_flags_string = f" {build_flags_string} -DGMX_BUILD_OWN_FFTW=ON"
+
+        build_flags_string += " -DBUILD_TESTING=OFF"
+
+        return inspect.cleandoc(f"""
+            mkdir build \\
+                && cd build \\
+                && cmake .. {build_flags_string} \\
+                && make -j$(nproc) \\
+                && make install \\
+                && . /usr/local/gromacs/bin/GMXRC \\
+                && cd ../
+            """)
+
+    def milc(self, selected_specializations: dict, specialization_points: dict) -> str:
+        assert self._gemini_interface is not None, "Gemini interface is not initialized."
+        # FIXME: this steep needs to be added to the container build. we are missing source dir
+        self._gemini_interface.edit_makefile(selected_specializations, "")
+        # FIXME: Make this configurable
+        milc_application_name = "su3_rmd"
+        return f"""
+        cd {milc_application_name} \\
+        && $cp ../Makefile . \\ 
+        && make {milc_application_name}
+        """
+
+    def openqcd(self, selected_specializations: dict, specialization_points: dict) -> str:
+        assert self._gemini_interface is not None, "Gemini interface is not initialized."
+        # FIXME: this steep needs to be added to the container build. we are missing source dir
+        self._gemini_interface.edit_makefile(selected_specializations, "")
+        return """
+        ENV MPI_INCLUDE=/usr/local/mpich/include
+        ENV MPI_HOME=/usr/local/mpich/lib 
+        cd main && make
+        """
+
+    def q_e(self, selected_specializations: dict, specialization_points: dict) -> str:
+        build_flags_string = utils.extract_build_flags(
+            selected_specializations, specialization_points, self._system_features
+        )
+        return f"""
+            mkdir build \\
+                && cd build \\
+                && cmake .. -DCMAKE_C_COMPILER=mpicc -DCMAKE_Fortran_COMPILER=mpif90 {build_flags_string} \\
+                && make -j$(nproc) \\
+                && cd ../
+            """
+
+    def vpic_kokkos(self, selected_specializations: dict, specialization_points: dict) -> str:
+        cpu_arch, gpu_arch = utils.get_kokkos_arch(self._system_features)
+        release_build = '-DCMAKE_BUILD_TYPE=Release  -DCMAKE_CXX_FLAGS="-rdynamic" '
+        build_flags_string = utils.extract_cmake_build_flags(
+            selected_specializations, specialization_points, self._system_features
+        )
+
+        if "CUDA" in selected_specializations.get("gpu_backends", {}):
+            build_flags_string += " -DCMAKE_CXX_COMPILER=/vpic-kokkos/kokkos/bin/nvcc_wrapper "
+        if cpu_arch:
+            build_flags_string += f" {cpu_arch} "
+        if gpu_arch:
+            build_flags_string += f" {gpu_arch} "
+
+        return f"""
+            mkdir build \\
+                && cd build \\
+                && cmake .. {release_build + build_flags_string} \\
+                && make -j$(nproc) \\
+                && make install \\
+                && cd ../
+            """
+
+    def llamma_cpp(self, selected_specializations: dict, specialization_points: dict) -> str:
+        build_flags_string = utils.extract_cmake_build_flags(
+            selected_specializations, specialization_points, self._system_features
+        )
+        logging.debug(f"Generated CMake build flags: {build_flags_string}")
+
+        if len(selected_specializations.get("vectorization_flags", {})) > 0:
+            build_flags_string += " -DGGML_NATIVE=OFF"
+
+        # Patch existing issues with llama.cpp - they have problems with BLAS paths.
+        if len(selected_specializations.get("linear_algebra_libraries", {})) > 0:
+            build_flags_string += " -DBLAS_INCLUDE_DIRS=${XAAS_BLAS_PATH}/include "
+
+        build_flags_string += " -DLLAMA_CURL=OFF"
+
+        return f"""
+            cmake -B build {build_flags_string} \\
+                && cmake --build build --config Release -j $(nproc)
+            """
+
+    def icon(self, selected_specializations: dict, specialization_points: dict) -> str:
+        # FIXME: This is not functional
+        # Not fully tested
+        raise NotImplementedError("ICON application specialization is not fully functional yet.")
+        # build_flags_string = utils.extract_build_flags(
+        #    selected_specializations, specialization_points
+        # )
+        # return f"""
+        #    ./configure {build_flags_string}
+        #    """
+
+    def cloudsc(self, selected_specializations: dict, specialization_points: dict) -> str:
+        # FIXME: This is not functional
+        # Not fully tested
+        raise NotImplementedError("ICON application specialization is not fully functional yet.")
+        # build_flags_string = utils.extract_build_flags(
+        #    selected_specializations, specialization_points
+        # )
+        # return f"""
+        #    ./cloudsc-bundle create \\
+        #        && ./cloudsc-bundle build --build-type release --cloudsc-fortran=ON --cloudsc-c=ON --with-serialbox {build_flags_string}
+        #    """
+
+
+class ApplicationSpecializationBuilder:
+    APPLICATIONS = {
+        Application.GROMACS: ApplicationSpecialization.gromacs,
+        Application.MILC: ApplicationSpecialization.milc,
+        Application.CLOUDSC: ApplicationSpecialization.cloudsc,
+        Application.ICON: ApplicationSpecialization.icon,
+        Application.LLAMMA_CPP: ApplicationSpecialization.llamma_cpp,
+        Application.OPENQCD: ApplicationSpecialization.openqcd,
+        Application.Q_E: ApplicationSpecialization.q_e,
+        Application.VPIC_KOKKOS: ApplicationSpecialization.vpic_kokkos,
+    }
+
+    @staticmethod
+    def application_configurer(
+        name: Application,
+    ) -> Callable[[ApplicationSpecialization, dict, dict], str]:
+        try:
+            return ApplicationSpecializationBuilder.APPLICATIONS[Application(name)]
+        except KeyError:
+            raise ValueError(f"Unsupported application: {name}")

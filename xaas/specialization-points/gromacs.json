@@ -38,7 +38,7 @@
       },
       "OpenMP": {
         "used_as_default": true,
-        "build_flag": " ",
+        "build_flag": "-DGMX_OPENMP",
         "minimum_version": null
       }
     },
