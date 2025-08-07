@@ -12,6 +12,11 @@ import yaml
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 
+class CPUArchitecture(str, Enum):
+    X86_64 = "x86_64"
+    ARM_64 = "arm64"
+
+
 class IRType(Enum):
     LLVM_IR = "llvm-ir"
 
@@ -51,12 +56,13 @@ class DockerLayer(DataClassYAMLMixin):
     build_location: str
     runtime_location: str
     arg_mapping: dict[str, DockerLayerVersion] | None = None
+    envs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class DockerLayers(DataClassYAMLMixin):
-    layers: dict[FeatureType, DockerLayer]
-    layers_deps: dict[str, DockerLayer]
+    layers: dict[CPUArchitecture, dict[FeatureType, DockerLayer]]
+    layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]]
 
     @staticmethod
     def load(config_path: str) -> DockerLayers:
@@ -117,11 +123,16 @@ class XaaSConfig:
         self._initialized = True
 
 
-class FeatureType(Enum):
+class FeatureType(str, Enum):
     OPENMP = "OPENMP"
     MPI = "MPI"
     CUDA = "CUDA"
     ONEAPI = "ONEAPI"
+    ROCM = "ROCM"
+    SYCL = "SYCL"
+    ROCFFT = "ROCFFT"
+    FFTW3 = "FFTW3"
+    ICPX = "ICPX"
 
 
 class FeatureSelectionType(Enum):
@@ -207,7 +218,7 @@ class SourceContainerConfig(DataClassYAMLMixin):
     working_directory: str
     source_directory: str
     project_name: str
-    cpu_architecture: str = "x86_64"
+    cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
     docker_repository: str = "spcleth/xaas-artifact"
 
     @staticmethod
@@ -231,22 +242,22 @@ class SourceContainerConfig(DataClassYAMLMixin):
 @dataclass
 class SourceDeploymentConfigBaseImage(DataClassYAMLMixin):
     name: str
-    provided_features: list[str]
+    provided_features: list[FeatureType]
     additional_commands: list[str]
 
 
 @dataclass
 class SourceDeploymentConfigSystem(DataClassYAMLMixin):
     name: str
-    cpu_architecture: str = "x86_64"
+    cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
     system_discovery: str | None = None
     base_image: SourceDeploymentConfigBaseImage | None = None
 
 
 @dataclass
 class ConfigSelection(DataClassYAMLMixin):
-    vectorization_flags: str
-    gpu_backends: str
+    vectorization_flags: str | None
+    gpu_backends: str | None
     parallel_libraries: list[str]
     fft_libraries: list[str]
     linear_algebra_libraries: str | None

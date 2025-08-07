@@ -559,13 +559,15 @@ def get_gpu_backends():
 
 def get_compilers():
     # Detect installed compilers on the system 
-    compilers = {}
-    for compiler in ["gcc", "g++", "clang", "clang++", "icc", "icx", "icpx", "ifort", "mpicc", "mpicxx", "mpifort"]:
-        try:
-            version = subprocess.check_output(f"{compiler} --version", shell=True, text=True).splitlines()[0]
-            compilers[compiler] = version
-        except subprocess.CalledProcessError:
-            compilers[compiler] = "Not found"
+    compilers = {"c": {}, "cxx": {}, "fortran": {}}
+
+    for lang, lang_compilers in [("c", ["gcc", "clang", "icc", "icx", "mpicc"]), ("cxx", ["g++", "clang++", "icpc", "icpx", "mpicxx"]), ("fortran", ["gfortran", "ifort", "mpifort"])]:
+        for compiler in lang_compilers:
+            try:
+                version = subprocess.check_output(f"{compiler} --version", shell=True, text=True).splitlines()[0]
+                compilers[lang][compiler] = version
+            except subprocess.CalledProcessError:
+                compilers[lang][compiler] = "Not found"
     return compilers
 
 def discover_system():

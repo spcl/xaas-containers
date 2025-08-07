@@ -55,7 +55,6 @@ def get_kokkos_arch(system_features):
     return cpu_arch, gpu_arch
 
 
-# This is for llama.cpp
 def get_cuda_architecture_flag(system_features):
     gpu_info_list = (
         system_features.get("Accelerators", {}).get("Accelerators", {}).get("nvidia", [])
@@ -338,9 +337,7 @@ def get_user_choices(checker, options, project_name, system_features) -> dict:
             for idx in selected.split(","):
                 if idx.strip().isdigit() and 1 <= int(idx.strip()) <= len(optimization_flags):
                     flag = optimization_flags[int(idx.strip()) - 1]
-                    if flag == "-DGGML_CUDA_PEER_MAX_BATCH_SIZE":
-                        flag += "=128"
-                    elif "=" not in flag:
+                    if "=" not in flag:
                         flag += "=ON"
                     selected_flags.append(flag)
 
@@ -349,8 +346,21 @@ def get_user_choices(checker, options, project_name, system_features) -> dict:
     return selected_options
 
 
+def map_c_compiler(cxx_compiler: str) -> str:
+    if cxx_compiler in ["icpx", "icx"]:
+        return "icx"
+    elif cxx_compiler in ["g++", "gcc"]:
+        return "gcc"
+    elif cxx_compiler in ["clang++", "clang"]:
+        return "clang"
+    else:
+        raise ValueError(f"Unknown C++ compiler: {cxx_compiler}")
+
+
 # For cmake files
-def extract_cmake_build_flags(selected_specializations: ConfigSelection, specialization_points):
+def extract_cmake_build_flags(
+    selected_specializations: ConfigSelection, specialization_points, system_features
+):
     """Extracts build flags from the selected specializations."""
     build_flags = []
 
@@ -363,7 +373,6 @@ def extract_cmake_build_flags(selected_specializations: ConfigSelection, special
             internal_build_flag += "=ON"
         build_flags.insert(0, internal_build_flag)
 
-    print("Specialization points selected", specialization_points)
     for category_name, category in selected_specializations.items():
         if category_name == "compiler":
             continue
@@ -397,9 +406,17 @@ def extract_cmake_build_flags(selected_specializations: ConfigSelection, special
         if flags["language"] == "c":
             build_flags.append(f"-DCMAKE_C_COMPILER={compiler}")
         elif flags["language"] == "cxx":
+            # Make sure we do not mix different C and C++ compilers.
+            build_flags.append(f"-DCMAKE_C_COMPILER={map_c_compiler(compiler)}")
             build_flags.append(f"-DCMAKE_CXX_COMPILER={compiler}")
         else:
             build_flags.append(f"-DCMAKE_Fortran_COMPILER={compiler}")
+
+    # set the selected GPU architecture for CUDA
+    # no selection needed/available for SYCL and Intel GPUs
+    if "CUDA" in selected_specializations["gpu_backends"]:
+        cuda_arch_flag = get_cuda_architecture_flag(system_features)
+        build_flags.append(cuda_arch_flag)
 
     # Ensure internal library flags are correctly appended
     if internal_library and any(

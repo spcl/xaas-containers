@@ -29,7 +29,7 @@ class ApplicationSpecialization:
     ) -> str:
         release_build = "-DCMAKE_BUILD_TYPE=Release "
         build_flags_string = utils.extract_cmake_build_flags(
-            selected_specializations, specialization_points
+            selected_specializations, specialization_points, self._system_features
         )
         build_flags_string = release_build + build_flags_string
 
@@ -39,12 +39,12 @@ class ApplicationSpecialization:
         build_flags_string += " -DBUILD_TESTING=OFF"
 
         return inspect.cleandoc(f"""
-            RUN mkdir build \\
+            mkdir build \\
                 && cd build \\
                 && cmake .. {build_flags_string} \\
                 && make -j$(nproc) \\
                 && make install \\
-                && source /usr/local/gromacs/bin/GMXRC \\
+                && . /usr/local/gromacs/bin/GMXRC \\
                 && cd ../
             """)
 
@@ -55,7 +55,7 @@ class ApplicationSpecialization:
         # FIXME: Make this configurable
         milc_application_name = "su3_rmd"
         return f"""
-        RUN cd {milc_application_name} \\
+        cd {milc_application_name} \\
         && $cp ../Makefile . \\ 
         && make {milc_application_name}
         """
@@ -67,15 +67,15 @@ class ApplicationSpecialization:
         return """
         ENV MPI_INCLUDE=/usr/local/mpich/include
         ENV MPI_HOME=/usr/local/mpich/lib 
-        RUN cd main && make
+        cd main && make
         """
 
     def q_e(self, selected_specializations: dict, specialization_points: dict) -> str:
         build_flags_string = utils.extract_build_flags(
-            selected_specializations, specialization_points
+            selected_specializations, specialization_points, self._system_features
         )
         return f"""
-            RUN mkdir build \\
+            mkdir build \\
                 && cd build \\
                 && cmake .. -DCMAKE_C_COMPILER=mpicc -DCMAKE_Fortran_COMPILER=mpif90 {build_flags_string} \\
                 && make -j$(nproc) \\
@@ -86,7 +86,7 @@ class ApplicationSpecialization:
         cpu_arch, gpu_arch = utils.get_kokkos_arch(self._system_features)
         release_build = '-DCMAKE_BUILD_TYPE=Release  -DCMAKE_CXX_FLAGS="-rdynamic" '
         build_flags_string = utils.extract_cmake_build_flags(
-            selected_specializations, specialization_points
+            selected_specializations, specialization_points, self._system_features
         )
 
         if "CUDA" in selected_specializations.get("gpu_backends", {}):
@@ -97,7 +97,7 @@ class ApplicationSpecialization:
             build_flags_string += f" {gpu_arch} "
 
         return f"""
-            RUN mkdir build \\
+            mkdir build \\
                 && cd build \\
                 && cmake .. {release_build + build_flags_string} \\
                 && make -j$(nproc) \\
@@ -106,30 +106,22 @@ class ApplicationSpecialization:
             """
 
     def llamma_cpp(self, selected_specializations: dict, specialization_points: dict) -> str:
-        # have to specify the blas vendor -DGGML_BLAS_VENDOR=OpenBLAS
-
-        # for perfomance portability
-        default_flag = "-DGGML_NATIVE=OFF "
-
         build_flags_string = utils.extract_cmake_build_flags(
-            selected_specializations, specialization_points
+            selected_specializations, specialization_points, self._system_features
         )
         logging.debug(f"Generated CMake build flags: {build_flags_string}")
 
-        if "CUDA" in selected_specializations.get("gpu_backends", {}):
-            cuda_arch_flag = utils.get_cuda_architecture_flag(self._system_features)
-            build_flags_string += " -DGGML_BACKEND_DL=OFF "
-            build_flags_string += f"{cuda_arch_flag}"
+        if len(selected_specializations.get("vectorization_flags", {})) > 0:
+            build_flags_string += " -DGGML_NATIVE=OFF"
 
-        if "MKL" in selected_specializations.get("linear_algebra_libraries", {}):
-            build_flags_string += "  -DCMAKE_C_COMPILER=icx -DCMAKE_CXX_COMPILER=icpx  -DGGML_BLAS_VENDOR=Intel10_64lp"
-        elif "OpenBLAS" in selected_specializations.get("linear_algebra_libraries", {}):
-            build_flags_string += "  -DGGML_BLAS_VENDOR=OpenBLAS"
-        elif "cuBLAS" in selected_specializations.get("linear_algebra_libraries", {}):
-            pass
+        # Patch existing issues with llama.cpp - they have problems with BLAS paths.
+        if len(selected_specializations.get("linear_algebra_libraries", {})) > 0:
+            build_flags_string += " -DBLAS_INCLUDE_DIRS=${XAAS_BLAS_PATH}/include "
+
+        build_flags_string += " -DLLAMA_CURL=OFF"
 
         return f"""
-            RUN cmake -B build {build_flags_string} \\
+            cmake -B build {build_flags_string} \\
                 && cmake --build build --config Release -j $(nproc)
             """
 
@@ -141,7 +133,7 @@ class ApplicationSpecialization:
         #    selected_specializations, specialization_points
         # )
         # return f"""
-        #    RUN ./configure {build_flags_string}
+        #    ./configure {build_flags_string}
         #    """
 
     def cloudsc(self, selected_specializations: dict, specialization_points: dict) -> str:
@@ -152,7 +144,7 @@ class ApplicationSpecialization:
         #    selected_specializations, specialization_points
         # )
         # return f"""
-        #    RUN ./cloudsc-bundle create \\
+        #    ./cloudsc-bundle create \\
         #        && ./cloudsc-bundle build --build-type release --cloudsc-fortran=ON --cloudsc-c=ON --with-serialbox {build_flags_string}
         #    """
 

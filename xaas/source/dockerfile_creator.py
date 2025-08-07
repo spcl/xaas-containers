@@ -3,6 +3,8 @@ import logging
 import inspect
 
 from xaas.config import SourceDeploymentConfigBaseImage
+from xaas.config import FeatureType, CPUArchitecture
+from xaas.config import XaaSConfig
 
 
 def install_mkl() -> str:
@@ -17,8 +19,6 @@ def install_mkl() -> str:
     RUN apt update
     # Install Intel MKL
     RUN apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
-    # mkl has to be sourced to be recognized by gromacs
-    RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
     """)
 
 
@@ -78,12 +78,21 @@ def install_scalapack() -> str:
 
 
 class DockerfileCreator:
-    def __init__(self, project_name: str, working_directory: str, cpu_architecture: str):
+    def __init__(
+        self, project_name: str, working_directory: str, cpu_architecture: CPUArchitecture
+    ):
         self.project_name = project_name
         self.working_directory = working_directory
+        self.init_dockerfile_content = []
         self.dockerfile_content = []
 
         self.architecture = cpu_architecture
+
+        self.env_configurations = []
+        self.env_values = []
+
+        # all features enabled by the user.
+        self.all_features: list[FeatureType] = []
 
     def create_source_dockerfile(self, project_directory: str) -> str:
         # source container
@@ -107,10 +116,9 @@ class DockerfileCreator:
 
     def add_base_image(self):
         if self.architecture == "x86_64":
-            base_image = "spcleth/xaas:source-base-x86-24.04"
-        elif self.architecture == "aarch64":
-            # FIXME: change
-            base_image = "ealnuaimi/xaas:ubuntu22.04-mpich3.4-arm-gnu13"
+            base_image = "docker.io/spcleth/xaas:source-base-x86-24.04"
+        elif self.architecture == "arm64":
+            base_image = "docker.io/spcleth/xaas:source-base-arm-24.04"
         else:
             raise ValueError(f"Unsupported architecture: {self.architecture}")
 
@@ -121,13 +129,13 @@ class DockerfileCreator:
 
     def add_multistage_phase(self, source_image: str, base_image: str | None):
         base_image_content = f"""
-        FROM {source_image} AS SOURCE
+        FROM docker.io/{source_image} AS SOURCE
         """
         self.dockerfile_content.append(inspect.cleandoc(base_image_content.strip()))
 
         if base_image is not None:
             base_image_content = f"""
-            FROM {base_image} AS DEPLOYMENT 
+            FROM docker.io/{base_image} AS DEPLOYMENT
             # Use Bash as the default shell for all RUN commands
             SHELL ["/bin/bash", "-c"]
             """
@@ -153,21 +161,41 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
             self.dockerfile_content.append('SHELL ["/bin/bash", "-c"]')
 
     def process_specializations(
-        self, selected_specializations: dict, system_features: dict, provided_features: list[str]
-    ):
-        if selected_specializations.get("gpu_backends"):
-            self.install_gpu_backend(selected_specializations, provided_features)
-        if selected_specializations.get("linear_algebra_libraries"):
-            self.install_linear_algebra_lib(selected_specializations, provided_features)
-        if selected_specializations.get("fft_libraries"):
-            self.install_fft_lib(selected_specializations, system_features, provided_features)
+        self,
+        selected_specializations: dict,
+        system_features: dict,
+        provided_features: list[FeatureType],
+    ) -> list[tuple[FeatureType, str]]:
+        features_requested: list[tuple[FeatureType, str]] = []
 
-    def install_gpu_backend(self, selected_specializations: dict, provided_features: list[str]):
-        # FIXME: move this into separate dependencies
+        if selected_specializations.get("gpu_backends"):
+            features, req_features = self.install_gpu_backend(
+                selected_specializations, provided_features
+            )
+            self.all_features.extend(features)
+            features_requested.extend(req_features)
+        if selected_specializations.get("linear_algebra_libraries"):
+            features, req_features = self.install_linear_algebra_lib(
+                selected_specializations, provided_features
+            )
+            self.all_features.extend(features)
+            features_requested.extend(req_features)
+        if selected_specializations.get("fft_libraries"):
+            features, req_features = self.install_fft_lib(
+                selected_specializations, system_features, provided_features
+            )
+            self.all_features.extend(features)
+            features_requested.extend(req_features)
+
+        return features_requested
+
+    def install_gpu_backend(
+        self, selected_specializations: dict, provided_features: list[FeatureType]
+    ) -> tuple[list[FeatureType], list[tuple[FeatureType, str]]]:
         gpu_backends = selected_specializations.get("gpu_backends", {})
 
         for backend, config in gpu_backends.items():
-            if backend.lower() == "cuda":  # Case-insensitive check for CUDA
+            if backend.lower() == "cuda":
                 cuda_version = config.get("version")
 
                 if not cuda_version:
@@ -175,17 +203,29 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
                         "CUDA version is required but missing in selected_specializations."
                     )
 
-                # Architecture mapping
-                arch_map = {
-                    "x86_64": "x86_64",
-                    "aarch64": "sbsa",
-                    "arm64": "sbsa",
-                    "ppc64le": "ppc64le",
-                }
-                arch_key = arch_map.get(self.architecture, "x86_64")  # Default to x86_64 if unknown
-                repo_url = f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/{arch_key}/"
+                if (
+                    cuda_version
+                    in XaaSConfig().layers.layers[self.architecture][FeatureType.CUDA].versions
+                ):
+                    logging.debug(f"Using Docker layer for CUDA version {cuda_version}.")
 
-                self.dockerfile_content.append(install_cuda(cuda_version, repo_url).strip())
+                    return ([FeatureType.CUDA], [(FeatureType.CUDA, cuda_version)])
+                else:
+                    logging.debug(f"No Docker layer for CUDA version {cuda_version}, install.")
+
+                    # Architecture mapping
+                    arch_map = {
+                        "x86_64": "x86_64",
+                        "aarch64": "sbsa",
+                        "arm64": "sbsa",
+                        "ppc64le": "ppc64le",
+                    }
+                    arch_key = arch_map.get(self.architecture, "x86_64")
+                    repo_url = f"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/{arch_key}/"
+
+                    self.dockerfile_content.append(install_cuda(cuda_version, repo_url).strip())
+
+                    return ([FeatureType.CUDA], [])
 
             elif backend.lower() in ["hip", "rocm"]:
                 rocm_version = config.get("version")
@@ -195,41 +235,66 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
                     )
 
                 self.dockerfile_content.append(install_rocm(rocm_version).strip())
+                return ([FeatureType.ROCM], [])
+
             elif backend.lower() == "sycl":
-                if backend.lower() in provided_features:
+                if FeatureType.SYCL in provided_features:
                     logging.debug("Using existing SYCL installation.")
                     continue
 
-                raise NotImplementedError("SYCL installation is not yet supported.")
+                raise NotImplementedError(
+                    "SYCL installation is not supported - it must be requested explicitly."
+                )
+
+        return ([], [])
 
     def install_fft_lib(
-        self, selected_specializations: dict, system_features: dict, provided: list[str]
-    ):
-        # FIXME: move this into separate dependencies
-
+        self,
+        selected_specializations: dict,
+        system_features: dict,
+        provided_features: list[FeatureType],
+    ) -> tuple[list[FeatureType], list[tuple[FeatureType, str]]]:
         fft_libraries = selected_specializations.get("fft_libraries", {})
 
-        # Prioritize MKL if present
         for fft_lib in fft_libraries:
+            # support both CPU and GPU versions
             if fft_lib in ["MKL", "mkl"]:
-                if "mkl" not in provided:
+                if (
+                    FeatureType.ONEAPI in self.all_features
+                    or FeatureType.ONEAPI in provided_features
+                ):
+                    logging.debug("Using existing oneAPI installation for MKL.")
+                    self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                    return ([], [])
+
+                mkl_version = fft_libraries["MKL"]["version"]
+
+                if (
+                    mkl_version
+                    in XaaSConfig().layers.layers[self.architecture][FeatureType.ONEAPI].versions
+                ):
+                    logging.debug(f"Using Docker layer for oneAPI-MKL version {mkl_version}.")
+
+                    self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                    return ([FeatureType.ONEAPI], [(FeatureType.ONEAPI, mkl_version)])
+                else:
+                    logging.debug(f"Installing oneAPI-MKL version {mkl_version}.")
                     self.dockerfile_content.append(install_mkl().strip())
-                # Stop here, don't install FFTW if MKL is chosen
-                return
+                    self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                    return ([FeatureType.ONEAPI], [])
 
         # Install rocFFT if explicitly selected
         for fft_lib in fft_libraries:
             if fft_lib.lower() == "rocfft":
                 self.dockerfile_content.append(install_rocfft.strip())
-                # Only one FFT library should be installed
-                return
+                return ([FeatureType.ROCFFT], [])
 
         # If MKL is not selected, check for FFTW
         for fft_lib, config in fft_libraries.items():
             if fft_lib.lower() in ["fftw", "fftw3"]:
                 if config.get("used_as_default", False):
                     logging.info(f"Skipping installation of {fft_lib} (used as default).")
-                    return
+                    return ([FeatureType.FFTW3], [])
 
                 # Download and extract FFTW
                 fftw_install_commands = """
@@ -249,9 +314,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
                 # Add architecture-specific flags
                 if self.architecture.startswith("x86"):
-                    configure_command += (
-                        " \\\n                    --enable-sse2 --enable-avx --enable-avx2"
-                    )
+                    configure_command += " \\\n --enable-sse2 --enable-avx --enable-avx2"
                     if "avx512" in self.extract_vectorization_flags(system_features):
                         configure_command += " --enable-avx512"
                 elif self.architecture in ["aarch64", "arm64"]:
@@ -266,26 +329,41 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
                     && make install
                 """
 
-                # Append all commands to Dockerfile
                 self.dockerfile_content.append(fftw_install_commands.strip())
                 self.dockerfile_content.append(configure_command.strip())
                 self.dockerfile_content.append(build_commands.strip())
-                return  # Stop after installing FFTW (ensures only one FFT library)
+                return ([FeatureType.FFTW3], [])
+
+        return ([], [])
 
     def install_linear_algebra_lib(
         self, selected_specializations: dict, provided_features: list[str]
-    ):
-        # FIXME: move this into separate dependencies
+    ) -> tuple[list[FeatureType], list[tuple[FeatureType, str]]]:
         linear_algebra_libs = selected_specializations.get("linear_algebra_libraries", {})
-        fft_libraries = selected_specializations.get("fft_libraries", {})
-
-        # True if MKL (GPU) or mkl (CPU) present in FFT OR Linear Algebra libs
-        mkl_already_installed = any(lib in ["MKL", "mkl"] for lib in list(fft_libraries.keys()))
 
         # Only install MKL if requested, but NOT already installed by FFT/other
-        if "MKL" in linear_algebra_libs and not mkl_already_installed:
-            self.dockerfile_content.append(install_mkl().strip())
-            return
+        if "MKL" in linear_algebra_libs:
+            if FeatureType.ONEAPI in self.all_features or FeatureType.ONEAPI in provided_features:
+                logging.debug("Using existing oneAPI installation for MKL.")
+                self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                return ([], [])
+
+            mkl_version = linear_algebra_libs["MKL"]["version"]
+            if (
+                mkl_version
+                in XaaSConfig().layers.layers[self.architecture][FeatureType.ONEAPI].versions
+            ):
+                logging.debug(f"Using Docker layer for oneAPI-MKL version {mkl_version}.")
+
+                self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                self.env_values.append('XAAS_BLAS_PATH="${MKLROOT}"')
+                return ([FeatureType.ONEAPI], [(FeatureType.ONEAPI, mkl_version)])
+            else:
+                logging.debug(f"Installing oneAPI-MKL version {mkl_version}.")
+                self.dockerfile_content.append(install_mkl().strip())
+                self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
+                self.env_values.append('XAAS_BLAS_PATH="${MKLROOT}"')
+                return ([FeatureType.ONEAPI], [])
 
         # Otherwise, install other linear algebra libraries as usual
         for lib in linear_algebra_libs:
@@ -306,20 +384,70 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
     def copy_from_first_build_stage(self, has_different_build_image: bool):
         if has_different_build_image:
             content = inspect.cleandoc("""
-            COPY --link --from=SOURCE /source /source
+            COPY --from=SOURCE /source /source
             WORKDIR /source
             """)
             self.dockerfile_content.append(content.strip())
 
     def application_build_command(self, build_command: str):
-        self.dockerfile_content.append(build_command.strip())
+        # define all envs before we process
+        cmd = build_command.strip()
+
+        if len(self.env_values) > 0:
+            for env in self.env_values:
+                cmd = f" export {env} && {cmd}"
+
+        if len(self.env_configurations) > 0:
+            for env in self.env_configurations:
+                cmd = f"{env} && {cmd}"
+
+        cmd = f"RUN {cmd}"
+
+        self.dockerfile_content.append(cmd)
 
     def add_default_command(self):
-        self.dockerfile_content.append("# Default command (modify if needed)")
+        self.dockerfile_content.append("")
         self.dockerfile_content.append('CMD ["/bin/bash"]')
+        self.dockerfile_content.append("")
 
     def add_build_args(self):
+        self.dockerfile_content.append("")
         self.dockerfile_content.append("ARG nproc")
+        self.dockerfile_content.append("")
+
+    def copy_from_layers(self, features_requested: list[tuple[FeatureType, str]]):
+        envs = []
+        for layer_type, version in features_requested:
+            layer = XaaSConfig().layers.layers[self.architecture][layer_type]
+
+            layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
+            layer_build_location = layer.build_location.replace(
+                f"${{{layer.version_arg}}}", version
+            )
+
+            self.init_dockerfile_content.append(
+                f"FROM docker.io/{XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
+            )
+            self.dockerfile_content.append(
+                f"COPY --from={layer_name}-layer {layer_build_location} {layer_build_location}"
+            )
+            for name, env in layer.envs.items():
+                env = env.replace(f"${{{layer.version_arg}}}", version)
+                envs.append(f'ENV {name}="{env}:${name}"')
+
+        self.dockerfile_content.append("")
+        self.dockerfile_content.extend(envs)
+
+    def handle_gpu_hooks(self):
+        # Container hooks for NVIDIA GPUs require that we define
+        # certain environment variables. Otherwise, the hook might not be enabled,
+        # and GPUs won't be available in the container.
+        #
+        # We tried to enable it at runtime by adding those envs to srun on CSCS Alps,
+        # but this failed.
+        if FeatureType.CUDA in self.all_features:
+            self.dockerfile_content.append("ENV NVIDIA_VISIBLE_DEVICES all")
+            self.dockerfile_content.append("ENV NVIDIA_DRIVER_CAPABILITIES compute,utility")
 
     def create_deployment_dockerfile(
         self,
@@ -334,18 +462,24 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
             source_image, deployment_base_image.name if deployment_base_image else None
         )
         self.add_build_args()
-        self.process_specializations(
+        features_requested = self.process_specializations(
             selected_specializations,
             system_features,
-            deployment_base_image.provided_features if deployment_base_image else None,
+            deployment_base_image.provided_features if deployment_base_image else [],
         )
         self.copy_from_first_build_stage(deployment_base_image is not None)
+        self.copy_from_layers(features_requested)
         self.application_build_command(build_command)
         self.add_default_command()
+        self.handle_gpu_hooks()
 
+        # mkl has to be sourced to be recognized by gromacs
+        # RUN source /opt/intel/oneapi/mkl/latest/env/vars.sh
         os.makedirs(self.working_directory, exist_ok=True)
 
         with open(dockerfile_name, "w") as file:
+            file.write("\n".join(self.init_dockerfile_content))
+            file.write("\n")
             file.write("\n".join(self.dockerfile_content))
 
         logging.info(f"Dockerfile created at: {dockerfile_name}")

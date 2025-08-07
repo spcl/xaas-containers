@@ -36,7 +36,7 @@ class Checker:
         combined_flags = {**json_simd, **json_optimization}
 
         # Include special flags AUTO, NONE, Portable from simd_vectorization or optimization_build_flags
-        for special in ["auto", "none", "portable"]:
+        for special in ["AUTO", "NONE", "PORTABLE", "ALL"]:
             if special in self.specialization_points.get("simd_vectorization", {}):
                 combined_flags[special] = self.specialization_points["simd_vectorization"][
                     special
@@ -61,6 +61,8 @@ class Checker:
             "avx512cd": "AVX_512",
             "avx512bw": "AVX_512",
             "avx512vl": "AVX_512",
+            "sve": ["ARM_SVE", "SVE"],
+            "asimd": ["ARM_NEON_ASIMD", "NEON_ASIMD"],
         }
 
         def matches_keyword(vectorization, keywords):
@@ -74,7 +76,7 @@ class Checker:
                 )
 
         # Add special flags if supported
-        detected_vectorizations.update(["auto", "none", "portable"])
+        detected_vectorizations.update(["AUTO", "NONE", "PORTABLE", "ALL"])
 
         # Return vectorizations coupled with their build flags as a clean dictionary
         supported_vectorizations = {
@@ -242,23 +244,27 @@ class Checker:
             for normalized_lib_name in normalized_lib_names:
                 # Detect MKL from module
                 if normalized_lib_name in ["MKL", "oneMKL"]:
+                    # if version is None:
                     version = loaded_modules.get("intel-oneapi-mkl") or loaded_modules.get(
                         "intel-mkl"
                     )
+
                     if version:
                         la_results["MKL"] = {
                             "build_flag": build_info.get("build_flag", "N/A"),
                             "version": version,
                             "used_as_default": build_info.get("used_as_default", False),
                         }
+                        continue
 
                     for sys_lib_name, system_info in system_la_libs.items():
                         if sys_lib_name.lower() == "mkl":
                             la_results["MKL"] = {
                                 "build_flag": build_info.get("build_flag", "N/A"),
-                                "version": version,
+                                "version": system_info["version"],
                                 "used_as_default": build_info.get("used_as_default", False),
                             }
+                            continue
 
                 # Detect cuBLAS from CUDA backend info
                 elif normalized_lib_name.lower() == "cublas":

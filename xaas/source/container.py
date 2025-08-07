@@ -121,7 +121,7 @@ class SourceContainerDeployment:
         else:
             raise RuntimeError(f"Unsupported mode: {self._config.mode}")
 
-        logging.debug(f"Selected specialization options: {selected_options}")
+        logging.debug(f"Selected specialization options: {json.dumps(selected_options, indent=2)}")
         app_specialzer = ApplicationSpecialization(system_features, self._gemini_interface)
         app_func = ApplicationSpecializationBuilder.application_configurer(application)
         build_command = app_func(app_specialzer, selected_options, specialization_points)
