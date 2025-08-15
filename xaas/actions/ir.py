@@ -18,7 +18,7 @@ from xaas.actions.preprocess import (
     contains_openmp_flag,
 )
 from xaas.actions.preprocess import PreprocessingResult, IRFileStatus, FileStatus
-from xaas.actions.docker import VolumeMount
+from xaas.docker import VolumeMount
 
 
 def is_vectoriation_flag(flag: str) -> bool:

@@ -12,6 +12,11 @@ import yaml
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 
+class CPUArchitecture(str, Enum):
+    X86_64 = "x86_64"
+    ARM_64 = "arm64"
+
+
 class IRType(Enum):
     LLVM_IR = "llvm-ir"
 
@@ -19,6 +24,21 @@ class IRType(Enum):
 class BuildSystem(Enum):
     CMAKE = "cmake"
     AUTOTOOLS = "autotools"
+
+
+class SourceContainerMode(Enum):
+    INTERACTIVE = "interactive"
+    PREDEFINED = "predefined"
+    AUTOMATED = "automated"
+
+
+class SourceContainerAutomated(Enum):
+    GEMINI = "gemini"
+
+
+class Language(str, Enum):
+    CXX = "cxx"
+    FORTRAN = "fortran"
 
 
 @dataclass
@@ -31,16 +51,18 @@ class DockerLayerVersion(DataClassYAMLMixin):
 class DockerLayer(DataClassYAMLMixin):
     dockerfile: str
     name: str
-    version: str
+    versions: list[str]
+    version_arg: str
     build_location: str
     runtime_location: str
     arg_mapping: dict[str, DockerLayerVersion] | None = None
+    envs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class DockerLayers(DataClassYAMLMixin):
-    layers: dict[FeatureType, DockerLayer]
-    layers_deps: dict[str, DockerLayer]
+    layers: dict[CPUArchitecture, dict[FeatureType, DockerLayer]]
+    layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]]
 
     @staticmethod
     def load(config_path: str) -> DockerLayers:
@@ -101,10 +123,16 @@ class XaaSConfig:
         self._initialized = True
 
 
-class FeatureType(Enum):
+class FeatureType(str, Enum):
     OPENMP = "OPENMP"
     MPI = "MPI"
     CUDA = "CUDA"
+    ONEAPI = "ONEAPI"
+    ROCM = "ROCM"
+    SYCL = "SYCL"
+    ROCFFT = "ROCFFT"
+    FFTW3 = "FFTW3"
+    ICPX = "ICPX"
 
 
 class FeatureSelectionType(Enum):
@@ -183,3 +211,91 @@ class DeployConfig(DataClassYAMLMixin):
     @classmethod
     def from_instance(cls, instance):
         return cls(**asdict(instance))
+
+
+@dataclass
+class SourceContainerConfig(DataClassYAMLMixin):
+    working_directory: str
+    source_directory: str
+    project_name: str
+    cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
+    docker_repository: str = "spcleth/xaas-artifact"
+
+    @staticmethod
+    def load(config_path: str) -> SourceContainerConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return SourceContainerConfig.from_yaml(f)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @classmethod
+    def from_instance(cls, instance):
+        obj = cls(**asdict(instance))
+        return obj
+
+
+@dataclass
+class SourceDeploymentConfigBaseImage(DataClassYAMLMixin):
+    name: str
+    provided_features: list[FeatureType]
+    additional_commands: list[str]
+
+
+@dataclass
+class SourceDeploymentConfigSystem(DataClassYAMLMixin):
+    name: str
+    cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
+    system_discovery: str | None = None
+    base_image: SourceDeploymentConfigBaseImage | None = None
+
+
+@dataclass
+class ConfigSelection(DataClassYAMLMixin):
+    vectorization_flags: str | None
+    gpu_backends: str | None
+    parallel_libraries: list[str]
+    fft_libraries: list[str]
+    linear_algebra_libraries: str | None
+    compiler: str
+
+
+@dataclass
+class SourceDeploymentConfigMode(DataClassYAMLMixin):
+    mode: SourceContainerMode
+    # FIXME: remove that - replace with mode
+    # predefined_config_string: str | None
+    predefined_config: ConfigSelection | None = None
+    automated_mode: SourceContainerAutomated | None = None
+
+
+@dataclass
+class SourceDeploymentConfig(DataClassYAMLMixin):
+    source_container: str
+    working_directory: str
+    project_name: str
+    language: Language
+    system: SourceDeploymentConfigSystem
+    mode: SourceDeploymentConfigMode
+    docker_repository: str = "spcleth/xaas-artifact"
+
+    @staticmethod
+    def load(config_path: str) -> SourceDeploymentConfig:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return SourceDeploymentConfig.from_yaml(f)
+
+    def save(self, config_path: str) -> None:
+        with open(config_path, "w") as f:
+            f.write(self.to_yaml())
+
+    @classmethod
+    def from_instance(cls, instance):
+        obj = cls(**asdict(instance))
+        return obj
