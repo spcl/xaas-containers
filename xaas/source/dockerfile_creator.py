@@ -345,6 +345,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         if "MKL" in linear_algebra_libs:
             if FeatureType.ONEAPI in self.all_features or FeatureType.ONEAPI in provided_features:
                 logging.debug("Using existing oneAPI installation for MKL.")
+                self.env_values.append('XAAS_BLAS_PATH="${MKLROOT}"')
                 self.env_configurations.append(". /opt/intel/oneapi/setvars.sh --force")
                 return ([], [])
 
