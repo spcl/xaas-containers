@@ -9,7 +9,7 @@ USER root
 RUN wget https://fftw.org/fftw-3.3.10.tar.gz \
     && tar -xf fftw-3.3.10.tar.gz \
     && cd fftw-3.3.10 \
-    && CFLAGS="-fPIC" ./configure --enable-float --enable-threads ${SIMD_FLAG} --prefix=/opt/fftw3 \
+    && ./configure --with-pic --enable-float --enable-threads ${SIMD_FLAG} --prefix=/opt/fftw3 \
     && make V=1 -j8 && make install
 
 FROM ubuntu:22.04
