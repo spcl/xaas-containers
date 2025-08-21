@@ -20,10 +20,28 @@ class Runner:
         self.gid = os.getgid()
         self.docker_repository = docker_repository
 
-    def build(self, dockerfile: str, path: str, tag: str, build_args: dict[str, str] | None = None):
+    def build(
+        self,
+        dockerfile: str,
+        path: str,
+        tag: str,
+        build_args: dict[str, str] | None = None,
+        platform: str | None = None,
+    ):
         buildargs = build_args or {}
         try:
-            self.client.images.build(dockerfile=dockerfile, path=path, tag=tag, buildargs=buildargs)
+            if platform is not None:
+                self.client.images.build(
+                    dockerfile=dockerfile,
+                    path=path,
+                    tag=tag,
+                    buildargs=buildargs,
+                    platform=f"linux/{platform}",
+                )
+            else:
+                self.client.images.build(
+                    dockerfile=dockerfile, path=path, tag=tag, buildargs=buildargs
+                )
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise
