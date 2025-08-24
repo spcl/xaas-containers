@@ -8,6 +8,7 @@ from dataclasses import field
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
 from xaas.config import BuildResult
+from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
 from xaas.config import XaaSConfig
@@ -48,6 +49,7 @@ class BuildGenerator(Action):
         self,
         docker_image_dev: str,
         layers_deps: dict[str, LayerDepConfig],
+        cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
     ) -> str:
         lines = []
@@ -56,9 +58,9 @@ class BuildGenerator(Action):
 
         dep_names = []
         for dep_name, dependency in layers_deps.items():
-            dep_cfg = XaaSConfig().layers.layers_deps[dep_name]
+            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
 
-            name = dep_cfg.name.replace("${version}", dep_cfg.version)
+            name = dep_cfg.name.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
                     continue
@@ -76,7 +78,7 @@ class BuildGenerator(Action):
         lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image_dev}")
 
         for dep, dep_name in dep_names:
-            dep_cfg = XaaSConfig().layers.layers_deps[dep]
+            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep]
             lines.append(
                 f"COPY --from={dep_name} {dep_cfg.build_location} {dep_cfg.build_location}"
             )
@@ -192,7 +194,10 @@ class BuildGenerator(Action):
                         settings[k] = v
 
                     dockerfile_content, flag_names = self._generate_docker_image(
-                        run_config.docker_image_dev, run_config.layers_deps, settings
+                        run_config.docker_image_dev,
+                        run_config.layers_deps,
+                        run_config.cpu_architecture,
+                        settings,
                     )
                     name_suffix = "_".join(flag_names)
 

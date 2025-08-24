@@ -4,6 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from xaas.config import DockerLayer
 from xaas.actions.action import Action
 from xaas.actions.build import BuildGenerator
 from xaas.config import DeployConfig, XaaSConfig
@@ -50,23 +51,37 @@ class Deployment(Action):
         copies = []
         runtime_copies = []
 
-        layers_to_add = []
+        layers_to_add: list[tuple[DockerLayer, str]] = []
         build_option = {}
 
         for feature, value in config.features_boolean.items():
             if not value:
                 continue
-            if feature in XaaSConfig().layers.layers:
-                layers_to_add.append(XaaSConfig().layers.layers[feature])
+            if feature in XaaSConfig().layers.layers[config.cpu_architecture]:
+                layers_to_add.append(
+                    (
+                        XaaSConfig().layers.layers[config.cpu_architecture][feature],
+                        config.features_versions[feature],
+                    )
+                )
 
         for feature in config.features_enabled:
-            if feature in XaaSConfig().layers.layers:
-                layers_to_add.append(XaaSConfig().layers.layers[feature])
+            if feature in XaaSConfig().layers.layers[config.cpu_architecture]:
+                layers_to_add.append(
+                    (
+                        XaaSConfig().layers.layers[config.cpu_architecture][feature],
+                        config.features_versions[feature],
+                    )
+                )
 
-        for layer in layers_to_add:
-            layer_name = layer.name.replace("${version}", layer.version)
-            layer_build_location = layer.build_location.replace("${version}", layer.version)
-            layer_runtime_location = layer.runtime_location.replace("${version}", layer.version)
+        for layer, version in layers_to_add:
+            layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
+            layer_build_location = layer.build_location.replace(
+                f"${{{layer.version_arg}}}", version
+            )
+            layer_runtime_location = layer.runtime_location.replace(
+                f"${{{layer.version_arg}}}", version
+            )
 
             lines.append(
                 f"FROM {XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
@@ -83,11 +98,13 @@ class Deployment(Action):
 
         for dep_name, dependency in config.layers_deps.items():
             # FIXME: merge with the similar implementation in build. separate module
-            dep_cfg = XaaSConfig().layers.layers_deps[dep_name]
-            layer_build_location = dep_cfg.build_location.replace("${version}", dep_cfg.version)
-            layer_runtime_location = dep_cfg.runtime_location.replace("${version}", dep_cfg.version)
+            dep_cfg = XaaSConfig().layers.layers_deps[config.cpu_architecture][dep_name]
+            layer_build_location = dep_cfg.build_location.replace("${version}", dependency.version)
+            layer_runtime_location = dep_cfg.runtime_location.replace(
+                "${version}", dependency.version
+            )
 
-            name = dep_cfg.name.replace("${version}", dep_cfg.version)
+            name = dep_cfg.name.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
                     continue

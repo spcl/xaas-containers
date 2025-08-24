@@ -159,6 +159,7 @@ class RunConfig(DataClassYAMLMixin):
     project_name: str
     build_system: BuildSystem
     source_directory: str
+    cpu_architecture: CPUArchitecture
     features_boolean: dict[FeatureType, tuple[str, str]]
     features_select: dict[str, dict[str, str]]
     additional_args: list[str]
@@ -188,8 +189,10 @@ class RunConfig(DataClassYAMLMixin):
 class DeployConfig(DataClassYAMLMixin):
     ir_image: str
     working_directory: str
+    cpu_architecture: CPUArchitecture
     features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
+    features_versions: dict[FeatureType, str]
     features_select: dict[str, str]
     docker_repository: str
     # FIXME: hide this config in image config

@@ -159,7 +159,7 @@ def preprocess_summary(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "preprocess.yml")
     )
-    action = ClangPreprocesser(1, False)
+    action = ClangPreprocesser(1, False, False)
     action.print_summary(config_obj)
 
 
@@ -193,7 +193,7 @@ def cpu_tuning_summary(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
-    action = ClangPreprocesser(1, False)
+    action = ClangPreprocesser(1, False, False)
     action.print_summary(config_obj)
 
 
