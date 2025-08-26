@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -87,8 +88,19 @@ class BuildGenerator(Action):
 
     def execute(self, run_config: RunConfig) -> bool:
         logging.info(f"[{self.name}] Building project {run_config.project_name}")
-
         config_obj = Config.from_instance(run_config)
+
+        # simple check for cuda runtime dependency
+        if FeatureType.CUDA in config_obj.features_boolean:
+            output = subprocess.run(
+                f"grep CUDART_VERSION -nrw {config_obj.source_directory}",
+                capture_output=True,
+                shell=True,
+                text=True,
+            )
+            if output.returncode == 0:
+                # we need to use older CUDA - not necessary so far
+                raise NotImplementedError("We need to use older CUDA for this project")
 
         status: bool
         if run_config.build_system == BuildSystem.CMAKE:
