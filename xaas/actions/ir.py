@@ -434,7 +434,10 @@ class IRCompiler(Action):
             ir_cmd = f"{ir_cmd} -emit-llvm"
 
         if len(cpu_tuning) > 0:
-            ir_cmd += " -mllvm -disable-llvm-optzns"
+            if baseline_command.compiler_type == Compiler.NVCC:
+                ir_cmd += ' -Xcompiler "-mllvm -disable-llvm-optzns"'
+            else:
+                ir_cmd += " -mllvm -disable-llvm-optzns"
             for flag in cpu_tuning:
                 ir_cmd = ir_cmd.replace(flag, "")
 
