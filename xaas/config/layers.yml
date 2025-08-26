@@ -10,7 +10,7 @@ layers:
     CUDA:
       dockerfile: Dockerfile.cuda
       name: cuda-${CUDA_VERSION}
-      versions: [12.1, 12.8]
+      versions: [12.1, 12.8, 12.9]
       version_arg: CUDA_VERSION
       build_location: /usr/local/cuda-${CUDA_VERSION}
       runtime_location: /usr/local/cuda-${CUDA_VERSION}
