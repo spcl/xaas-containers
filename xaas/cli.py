@@ -134,7 +134,8 @@ def preprocess():
 @click.option(
     "--no-openmp-check", "openmp_check", is_flag=True, default=True, help="Enable OpenMP support"
 )
-def preprocess_run(config, parallel_workers, openmp_check) -> None:
+@click.option("--dry-run", "dry_run", is_flag=True, default=False, help="Skip actual processing")
+def preprocess_run(config, parallel_workers, openmp_check, dry_run) -> None:
     initialize()
 
     run_config = RunConfig.load(config)
@@ -143,7 +144,7 @@ def preprocess_run(config, parallel_workers, openmp_check) -> None:
         os.path.join(run_config.working_directory, "build_analyze.yml")
         # os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
-    action = ClangPreprocesser(parallel_workers, openmp_check)
+    action = ClangPreprocesser(parallel_workers, openmp_check, dry_run)
     action.validate(config_obj)
     action.execute(config_obj)
 
@@ -158,7 +159,7 @@ def preprocess_summary(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "preprocess.yml")
     )
-    action = ClangPreprocesser(1, False)
+    action = ClangPreprocesser(1, False, False)
     action.print_summary(config_obj)
 
 
@@ -192,7 +193,7 @@ def cpu_tuning_summary(config) -> None:
     config_obj = PreprocessingResult.load(
         os.path.join(run_config.working_directory, "cpu_tuning.yml")
     )
-    action = ClangPreprocesser(1, False)
+    action = ClangPreprocesser(1, False, False)
     action.print_summary(config_obj)
 
 

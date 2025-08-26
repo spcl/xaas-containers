@@ -2,15 +2,17 @@ import copy
 import logging
 import os
 import json
+import re
 from pathlib import Path
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import ThreadPoolExecutor, Future
+from typing import cast
 
 import tqdm
-from docker.models.containers import RUN_CREATE_KWARGS, Container
+from docker.models.containers import Container
 
 from xaas.actions.action import Action
-from xaas.actions.analyze import CompileCommand
+from xaas.actions.analyze import CompileCommand, Compiler, NVCCCompileCommand
 from xaas.actions.preprocess import (
     ProcessedResults,
     ProjectDivergence,
@@ -19,18 +21,7 @@ from xaas.actions.preprocess import (
 )
 from xaas.actions.preprocess import PreprocessingResult, IRFileStatus, FileStatus
 from xaas.docker import VolumeMount
-
-
-def is_vectoriation_flag(flag: str) -> bool:
-    """
-    This implementation only supports Clang.
-    """
-    # gcc: -fopenmp
-    # clang: -fopenmp=libomp
-    # intel (icx/icpc): -qopenmp
-    # intel (icx/icpx): -fopenmp
-    # FIXME: add more for nvidia hpc of Cray if we need to
-    return any("-fopenmp" in flag or "-qopenmp" in flag for flag in flags)
+from xaas.config import FeatureType
 
 
 class IRCompiler(Action):
@@ -58,14 +49,12 @@ class IRCompiler(Action):
         """
 
         all_configurations: set[str] = set()
-        targets_per_config = defaultdict(int)
+        targets_per_config: dict[str, int] = defaultdict(int)
         hashes_per_config = defaultdict(set)
         new_hashes_per_config = defaultdict(set)
         baseline_hashes: set[str] = set()
         non_baseline_hashes: set[str] = set()
         all_hashes: set[str] = set()
-
-        shared_by_everyone = set()
 
         for target_name, target_info in config.targets.items():
             baseline_project_name = target_info.baseline_project
@@ -84,11 +73,13 @@ class IRCompiler(Action):
                 all_hashes.add(baseline_status.hash)
             else:
                 logging.warning(
-                    f"Baseline project '{baseline_project_name}' not found in projects for target '{target_name}'."
+                    f"Baseline project '{baseline_project_name}' not found in projects "
+                    f"for target '{target_name}'."
                 )
 
             for project_name, project_status in target_info.projects.items():
                 all_configurations.add(project_name)
+                assert project_status.hash
                 hashes_per_config[project_name].add(project_status.hash)
                 targets_per_config[project_name] += 1
 
@@ -131,7 +122,8 @@ class IRCompiler(Action):
         logging.info(f"\tUnique Hashes in Baseline Configurations: {len(baseline_hashes)}")
 
         logging.info(
-            f"\tUnique Hashes Used Only by Non-Baseline Configurations: {len(non_baseline_only_hashes)}"
+            f"\tUnique Hashes Used Only by Non-Baseline Configurations: "
+            f"{len(non_baseline_only_hashes)}"
         )
 
     def execute(self, config: PreprocessingResult) -> bool:
@@ -202,7 +194,7 @@ class IRCompiler(Action):
                         not self.conditional_build
                         or os.path.basename(baseline_project) in self.build_projects
                     ):
-                        logging.info(f"[{self.name}] Build file {target} for {baseline_project}")
+                        logging.debug(f"[{self.name}] Build file {target} for {baseline_project}")
                         cmake_cmd = compile_dbs[baseline_project][target]["command"]
                         cmake_directory = compile_dbs[baseline_project][target]["directory"]
                         ir_path, is_new = self._find_id(
@@ -245,10 +237,11 @@ class IRCompiler(Action):
                         )
                         ir_target = os.path.join("/irs", target, ir_path)
                         if not is_new:
-                            logging.info(
-                                f"[{self.name}] Skip building shared IR file {target} for {project_name}"
+                            logging.debug(
+                                f"[{self.name}] Skip building shared IR file {target} "
+                                f"for {project_name}"
                             )
-                            fut = Future()
+                            fut: Future[str] = Future()
                             fut.set_result(ir_target)
                             futures.append(fut)
                             continue
@@ -261,7 +254,7 @@ class IRCompiler(Action):
                                 self._compile_ir,
                                 containers[project_name],
                                 target,
-                                status.baseline_command,
+                                project_status.command,
                                 cmake_cmd,
                                 cmake_directory,
                                 ir_path,
@@ -313,9 +306,6 @@ class IRCompiler(Action):
         if errors > 0:
             logging.error(f"Failed to build {errors} IR files")
             raise RuntimeError(f"Failed to build {errors} IR files")
-
-        # Print summary
-        # self.print_summary(config)
 
         return True
 
@@ -434,19 +424,29 @@ class IRCompiler(Action):
         actual_target = os.path.relpath(os.path.join("/build", target), cmake_directory)
 
         ir_cmd = cmake_cmd.replace(actual_target, ir_target)
-        ir_cmd = f"{ir_cmd} -emit-llvm"
+
+        if baseline_command.compiler_type == Compiler.NVCC:
+            ir_cmd = CUDA.compile_nvcc(ir_cmd, cast(NVCCCompileCommand, baseline_command))
+
+            logging.debug(f"CUDA/nvcc detected, final command: {ir_cmd}")
+        else:
+            # Standard compilation
+            ir_cmd = f"{ir_cmd} -emit-llvm"
 
         if len(cpu_tuning) > 0:
-            ir_cmd += " -mllvm -disable-llvm-optzns"
+            if baseline_command.compiler_type == Compiler.NVCC:
+                ir_cmd += ' -Xcompiler "-mllvm -disable-llvm-optzns"'
+            else:
+                ir_cmd += " -mllvm -disable-llvm-optzns"
             for flag in cpu_tuning:
                 ir_cmd = ir_cmd.replace(flag, "")
 
         logging.info(f"IR Compilation of {baseline_command.source}, {target} -> {ir_target}")
-        # if we just pass the raw comamnd
         code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], "/build")
 
         if code != 0:
             logging.error(f"Error generating IR for {baseline_command.source}: {output}")
+            logging.error(f"Failing command {ir_cmd}")
             return None
 
         logging.debug(f"Successfully generated IR for {baseline_command.source}")
@@ -459,3 +459,104 @@ class IRCompiler(Action):
             return False
 
         return True
+
+
+class CUDA:
+    SUPPORTED_CUDA_ARCHITECTURES = [
+        "50",
+        "52",
+        "53",
+        "60",
+        "61",
+        "62",
+        "70",
+        "72",
+        "75",
+        "80",
+        "86",
+        "87",
+        "89",
+        "90",
+    ]
+
+    @staticmethod
+    def compile_nvcc(ir_cmd: str, cmd: NVCCCompileCommand) -> str:
+        """
+        CUDA-specific modifications for the nvcc compiler
+        1. Remove ALL existing gencode options
+        2. Add our standardized gencode options
+        3. Use host compiler with -emit-llvm for IR generation
+        """
+
+        # Remove all existing gencode options
+        ir_cmd = CUDA.remove_all_gencode_options(ir_cmd)
+
+        # Add our standardized gencode options
+        standardized_gencodes = CUDA.generate_standardized_gencode_options()
+        ir_cmd = f"{ir_cmd} {' '.join(standardized_gencodes)}"
+        logging.debug(f"Added standardized CUDA gencode options: {len(standardized_gencodes)}")
+
+        """
+            Generate LLVM IR using the host compiler.
+        """
+        ir_cmd = f"{ir_cmd} -emit-llvm"
+
+        if cmd.response_files:
+            """
+                Remove all --options-file references from the command
+                since we've already processed them in the analyze phase
+            """
+            ir_cmd = re.sub(r"--options-file\s+[\w/._-]+", "", ir_cmd)
+
+            for file in cmd.response_files:
+                ir_cmd = f'{ir_cmd} --options-file="{file}"'
+
+        return ir_cmd
+
+    @staticmethod
+    def remove_all_gencode_options(command: str) -> str:
+        """
+        Remove ALL existing gencode options from the nvcc command.
+        This includes -gencode, --generate-code, and related patterns like -arch sm_XX
+        """
+        patterns_to_remove = [
+            r"-gencode\s*=?\s*arch=compute_\d+,code=(?:sm_\d+|compute_\d+|\[[\w_,\s]+\])",
+            r"--generate-code\s*=?\s*arch=compute_\d+,code=(?:sm_\d+|compute_\d+|\[[\w_,\s]+\])",
+            r"-arch\s+sm_\d+",
+        ]
+
+        result = command
+        for pattern in patterns_to_remove:
+            result = re.sub(pattern, "", result)
+
+        """
+            Remove whitespaces and multiple quotes "".
+            CMake can generate additional quotes around gencode; we need to remove them as
+            nvcc would otherwise treat them as additional input files.
+        """
+        result = re.sub(r"\s+", " ", result).strip()
+        result = re.sub(r"\"\"", " ", result).strip()
+
+        return result
+
+    @staticmethod
+    def generate_standardized_gencode_options() -> list[str]:
+        """
+        Generate our standardized set of gencode options for all supported architectures.
+        This is intended to replace any existing gencode options with our set.
+        """
+        gencode_options = []
+
+        # Add SASS targets for all supported architectures
+        for arch in CUDA.SUPPORTED_CUDA_ARCHITECTURES:
+            gencode_options.append(f"-gencode=arch=compute_{arch},code=sm_{arch}")
+
+        # Add PTX target only for the highest architecture
+        # This ensures future compatibility with newer architectures
+        if CUDA.SUPPORTED_CUDA_ARCHITECTURES:
+            highest_arch = max(CUDA.SUPPORTED_CUDA_ARCHITECTURES, key=int)
+            gencode_options.append(
+                f"-gencode=arch=compute_{highest_arch},code=compute_{highest_arch}"
+            )
+
+        return gencode_options
