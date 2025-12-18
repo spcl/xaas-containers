@@ -14,8 +14,6 @@ We propose two new solutions:
 
 If you use XaaS containers in your research, please cite our SC '25 paper:
 
-```
-```
 ```bibtex
 @inproceedings{10.1145/3712285.3759868,
 author = {Copik, Marcin and Alnuaimi, Eiman and Kamatar, Alok and Hayot-Sasson, Valerie and Madonna, Alberto and Gamblin, Todd and Chard, Kyle and Foster, Ian and Hoefler, Torsten},
