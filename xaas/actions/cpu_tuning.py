@@ -124,7 +124,7 @@ class CPUTuning(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=config.build.docker_image_dev,
+                        image=config.build.docker_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,

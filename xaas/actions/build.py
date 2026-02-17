@@ -30,7 +30,6 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
     docker_image: str = "builder-19"
-    docker_image_dev: str = "builder-19"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
     @staticmethod
@@ -48,7 +47,7 @@ class BuildGenerator(Action):
 
     def _generate_docker_image(
         self,
-        docker_image_dev: str,
+        docker_image: str,
         layers_deps: dict[str, LayerDepConfig],
         cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
@@ -76,7 +75,7 @@ class BuildGenerator(Action):
 
             lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}")
 
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image_dev}")
+        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image}")
 
         for dep, dep_name in dep_names:
             dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep]
@@ -192,7 +191,7 @@ class BuildGenerator(Action):
             for active, nonactive in subsets:
                 build_dir = self.generate_name(active, option)
 
-                docker_image = f"{run_config.docker_image_dev}"
+                docker_image = f"{run_config.docker_image}"
 
                 if len(run_config.layers_deps) > 0:
                     logging.info(
@@ -206,7 +205,7 @@ class BuildGenerator(Action):
                         settings[k] = v
 
                     dockerfile_content, flag_names = self._generate_docker_image(
-                        run_config.docker_image_dev,
+                        run_config.docker_image,
                         run_config.layers_deps,
                         run_config.cpu_architecture,
                         settings,
