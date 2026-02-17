@@ -298,7 +298,7 @@ class IRCompiler(Action):
                     errors += 1
 
         for container in containers.values():
-            container.stop(timeout=0)
+            container.remove(force=True)
 
         config_path = os.path.join(config.build.working_directory, "ir_compilation.yml")
         config.save(config_path)
