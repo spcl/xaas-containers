@@ -20,12 +20,11 @@ class DockerImageBuilder(Action):
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
         )
-        self.BASE_IMAGE = "spcleth/xaas:llvm-19"
-        self.BASE_IMAGE_DEV = "spcleth/xaas:llvm-19-dev"
+        self.BASE_IMAGE = "spcleth/xaas:builder-19"
+        self.BASE_IMAGE_DEV = "spcleth/xaas:builder-19"
 
-        self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
-
-        self.CLANG_PATH = "/usr/bin/c++"
+        self.OPT_PATH_DEV = "opt-19"
+        self.CLANG_PATH = "clang++-19"
 
         self.docker_repository = docker_repository
 
@@ -146,7 +145,7 @@ class DockerImageBuilder(Action):
         # (1) We run the custom opt pass to replace targets
         # (2) We run optimizations (together with the previous one)
         # FIXME: hardcoding
-        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/build/libReplaceTargetFeatures.so "
+        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/feature-analyzer/libReplaceTargetFeatures.so "
         cmd += '-passes="replace-target-features" '
 
         if project.cpu_tuning:
@@ -190,14 +189,6 @@ class DockerImageBuilder(Action):
         if uses_dev_image:
             lines.append("COPY --from=llvm-dev /opt/llvm /opt/llvm")
             lines.append("COPY --from=features-analyzer /tools /tools")
-
-        lines.extend(
-            [
-                "# Add build directories for IR analysis",
-                "WORKDIR /builds/",
-                "RUN apt-get update && apt-get install -y --no-install-recommends parallel && rm -rf /var/lib/apt/lists/*",
-            ]
-        )
 
         for i, build in enumerate(config.build.build_results):
             build_path = os.path.relpath(build.directory, build_dir)

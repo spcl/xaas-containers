@@ -269,9 +269,9 @@ class CPUTuning(Action):
 
         # FIXME: make into nice config
         get_features_cmd = [
-            "/opt/llvm/bin/opt",
+            "opt-19",
             "-load-pass-plugin",
-            "/tools/build/libReplaceTargetFeatures.so",
+            "/tools/feature-analyzer/libReplaceTargetFeatures.so",
             '-passes="replace-target-features"',
             "-query-features=true",
             ir_file,

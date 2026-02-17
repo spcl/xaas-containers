@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
+FROM spcleth/xaas:builder-19
+
+# install all the extra things we need for cross-compilation
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install --yes --no-install-recommends \
+        crossbuild-essential-arm64 \
+        crossbuild-essential-amd64

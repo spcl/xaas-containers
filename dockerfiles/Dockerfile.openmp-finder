@@ -1,10 +1,13 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
 FROM spcleth/xaas:llvm-19
 
-#USER root
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install -y \
+    libclang-19-dev \
+    libzstd-dev
 
-RUN apt-get update && apt-get install libclang-19-dev
-
-#RUN mkdir /tools && chown docker_user:docker_user /tools
-RUN mkdir /tools 
+RUN mkdir /tools
 ADD tools/ /tools/openmp-finder
-RUN cd /tools/openmp-finder && cmake -DCMAKE_BUILD_TYPE=Release . && make 
+RUN cd /tools/openmp-finder && cmake -DCMAKE_BUILD_TYPE=Release . && make -j$( nproc )

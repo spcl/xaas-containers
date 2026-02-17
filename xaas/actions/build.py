@@ -29,8 +29,8 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
-    docker_image: str = "builder"
-    docker_image_dev: str = "builder-19-dev"
+    docker_image: str = "builder-19"
+    docker_image_dev: str = "builder-19"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
     @staticmethod
