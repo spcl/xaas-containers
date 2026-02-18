@@ -20,7 +20,7 @@ class DockerImageBuilder(Action):
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
         )
-        self.BASE_IMAGE = "spcleth/xaas:builder-19"
+        self.BASE_IMAGE = "spcleth/xaas:builder-19-cross"
 
         self.OPT_PATH_DEV = "opt-19"
         self.CLANG_PATH = "clang++-19"

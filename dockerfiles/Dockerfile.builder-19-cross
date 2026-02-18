@@ -3,8 +3,37 @@
 
 FROM spcleth/xaas:builder-19
 
-# install all the extra things we need for cross-compilation
+# Install GCC toolchains and C/C++ standard libraries for cross-compilation
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
     eatmydata apt-get update && eatmydata apt-get install --yes --no-install-recommends \
         crossbuild-essential-arm64 \
         crossbuild-essential-amd64
+
+# Install libgomp for cross-compilation with GCC+OpenMP
+# TODO: this probably isn't needed, since we don't compile using GCC and Clang seems to be incompatible with libgomp
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install --yes --no-install-recommends \
+        libgomp1-arm64-cross \
+        libgomp1-amd64-cross
+
+# Install libomp5-19 shared libraries for cross-compilation with Clang+OpenMP
+RUN --mount=type=tmpfs,target=/var/cache/apt --mount=type=tmpfs,target=/var/lib/apt --mount=type=tmpfs,target=/var/log/apt \
+        --mount=type=tmpfs,target=/tmp \
+    cd /tmp && \
+    eatmydata dpkg --add-architecture arm64 && \
+    eatmydata dpkg --add-architecture amd64 && \
+    eatmydata apt-get update && eatmydata apt-get download --yes \
+        libomp5-19:arm64 \
+        libomp5-19:amd64 && \
+    echo "setting up libomp.so for aarch64-linux-gnu" && \
+        dpkg-deb --extract libomp5*_arm64.deb aarch64-linux-gnu/ && \
+        mkdir -p /usr/aarch64-linux-gnu/lib/ && \
+        mv --no-clobber aarch64-linux-gnu/usr/lib/llvm-19/lib/* /usr/aarch64-linux-gnu/lib/ && \
+        ls /usr/aarch64-linux-gnu/lib/libomp.so.5 && \
+        ln -s libomp.so.5 /usr/aarch64-linux-gnu/lib/libomp.so && \
+    echo "setting up libomp.so for x86_64-linux-gnu" && \
+        dpkg-deb --extract libomp5*_amd64.deb x86_64-linux-gnu/ && \
+        mkdir -p /usr/x86_64-linux-gnu/lib/ && \
+        mv --no-clobber x86_64-linux-gnu/usr/lib/llvm-19/lib/* /usr/x86_64-linux-gnu/lib/ && \
+        ls /usr/x86_64-linux-gnu/lib/libomp.so.5 && \
+        ln -s libomp.so.5 /usr/x86_64-linux-gnu/lib/libomp.so
