@@ -219,12 +219,12 @@ class BuildGenerator(Action):
                         f.write(dockerfile_content)
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
-                    logging.info(
-                        f"[{self.name}] Building Docker image: {run_config.docker_image}, in {working_dir}"
-                    )
-
                     if len(name_suffix) > 0:
                         docker_image = f"{docker_image}-{name_suffix}"
+
+                    logging.info(
+                        f"[{self.name}] Building Docker image: {docker_image}, in {working_dir}"
+                    )
 
                     self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
