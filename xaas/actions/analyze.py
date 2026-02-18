@@ -17,6 +17,7 @@ from mashumaro.config import BaseConfig
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
+from xaas.config import TargetTriple
 
 
 class Compiler(str, Enum):
@@ -27,6 +28,7 @@ class Compiler(str, Enum):
 
 class DivergenceReason(Enum):
     COMPILER = "compiler"
+    TARGET_TRIPLE = "target-triple"
     FLAGS = "flags"
     INCLUDES = "includes"
     DEFINITIONS = "definitions"
@@ -44,6 +46,7 @@ class CompileCommand(DataClassYAMLMixin):
     build_dir: str
     compiler: str
     compiler_type: Compiler
+    target_triple: TargetTriple | None = None
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
     optimizations: set = field(default_factory=set)
@@ -261,6 +264,12 @@ class BuildAnalyzer(Action):
                 "removed": cmd1.compiler,
             }
 
+        if cmd1.target_triple is not cmd2.target_triple:
+            differences[DivergenceReason.TARGET_TRIPLE] = {
+                "added": cmd2.target_triple,
+                "removed": cmd1.target_triple,
+            }
+
         flags_diff1 = cmd2.flags - cmd1.flags
         flags_diff2 = cmd1.flags - cmd2.flags
         if flags_diff1 or flags_diff2:
@@ -397,6 +406,16 @@ class BuildAnalyzer(Action):
             elif elem.startswith("-W"):
                 i += 1
                 continue
+            # Handle target triple
+            elif elem.startswith("--target=") or elem == "-target":
+                if result.target_triple is not None:
+                    raise RuntimeError(f"Target triple was already set to '{result.target_triple}'")
+
+                if elem == "-target":
+                    i += 1
+                    result.target_triple = TargetTriple(elems[i])
+                else:
+                    result.target_triple = TargetTriple(elem.removeprefix("--target="))
             else:
                 handled = False
 

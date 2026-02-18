@@ -8,7 +8,7 @@ from dataclasses import field
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult
+from xaas.config import BuildResult, TargetTriple
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -249,6 +249,19 @@ class BuildGenerator(Action):
                     if arg is not None:
                         cmake_args.append(f"-D{arg}")
 
+                target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
+
+                toolchain_file_name = "toolchain.cmake"
+                toolchain_file = os.path.join(new_dir, toolchain_file_name)
+                toolchain_lines = [
+                    "set(CMAKE_C_COMPILER clang)",
+                    "set(CMAKE_CXX_COMPILER clang++)",
+                    f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
+                    f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+                ]
+                with open(toolchain_file, "w") as toolchain_output:
+                    toolchain_output.write('\n'.join(toolchain_lines))
+
                 logging.info(
                     f"Executing build in {new_dir}, image {docker_image}, combination: {active}"
                 )
@@ -257,6 +270,7 @@ class BuildGenerator(Action):
                     "bash",
                     "-c",
                     "'cmake",
+                    f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                     *cmake_args,

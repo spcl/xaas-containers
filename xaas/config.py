@@ -17,6 +17,23 @@ class CPUArchitecture(str, Enum):
     ARM_64 = "arm64"
 
 
+# TODO: Replace CPUArchitecture with this!
+#   (it's separate for now to avoid breaking existing configs)
+class TargetTriple(str, Enum):
+    X86_64_LINUX_GNU = "x86_64-linux-gnu"
+    AARCH64_LINUX_GNU = "aarch64-linux-gnu"
+
+    @staticmethod
+    def from_cpu_architecture(cpu_architecture: CPUArchitecture) -> TargetTriple:
+        match cpu_architecture:
+            case CPUArchitecture.X86_64:
+                return TargetTriple.X86_64_LINUX_GNU
+            case CPUArchitecture.ARM_64:
+                return TargetTriple.AARCH64_LINUX_GNU
+            case _:
+                raise ValueError(f"Unsupported CPU architecture: {cpu_architecture}")
+
+
 class IRType(Enum):
     LLVM_IR = "llvm-ir"
 
