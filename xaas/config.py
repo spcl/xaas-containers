@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import copy
 import os
-from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
@@ -157,6 +155,97 @@ class FeatureSelectionType(Enum):
 
 
 @dataclass
+class BuildSystemArguments(DataClassYAMLMixin):
+    environment_set: dict[str, list[str]] = field(default_factory=dict)
+    environment_add: dict[str, list[str]] = field(default_factory=dict)
+    property_set: dict[str, list[str]] = field(default_factory=dict)
+    property_add: dict[str, list[str]] = field(default_factory=dict)
+    arguments_add: list[str] = field(default_factory=list)
+
+    @staticmethod
+    def __merge_set(a: dict[str, list[str]], b: dict[str, list[str]]) -> dict[str, list[str]]:
+        if not a.keys().isdisjoint(b.keys()):
+            raise RuntimeError(f"duplicate keys: {a.keys() & b.keys()}")
+
+        return a | b
+
+    @staticmethod
+    def __merge_add(a: dict[str, list[str]], b: dict[str, list[str]]) -> dict[str, list[str]]:
+        res = a | b
+        for k in a.keys() & b.keys():
+            res[k] = a[k] + b[k]
+        return res
+
+    @staticmethod
+    def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
+        res = BuildSystemArguments()
+
+        # merge *_set mappings, throwing an exception if the same key is present in both
+
+        res.environment_set = a.environment_set | b.environment_set
+        if not a.environment_set.keys().isdisjoint(b.environment_set.keys()):
+            raise RuntimeError(f"duplicate keys in environment_set: {a.environment_set.keys() & b.environment_set.keys()}")
+
+        res.property_set = a.property_set | b.property_set
+        if not a.property_set.keys().isdisjoint(b.property_set.keys()):
+            raise RuntimeError(f"duplicate keys in property_set: {a.property_set.keys() & b.property_set.keys()}")
+
+        # merge *_add mappings, concatenating the values if the same key is present in both
+
+        res.environment_add = a.environment_add | b.environment_add
+        for k in a.environment_add.keys() & b.environment_add.keys():
+            res.environment_add[k] = a.environment_add[k] + b.environment_add[k]
+
+        res.property_add = a.property_add | b.property_add
+        for k in a.property_add.keys() & b.property_add.keys():
+            res.property_add[k] = a.property_add[k] + b.property_add[k]
+
+        # simply concatenate any additional arguments
+        res.arguments_add = a.arguments_add + b.arguments_add
+
+        return res
+
+    @staticmethod
+    def __effective_mapping(
+            mappings_default: dict[str, str], mappings_set: dict[str, list[str]], mappings_add: dict[str, list[str]],
+            separator: str) -> dict[str, str]:
+        if not separator:
+            raise RuntimeError("separator string must not be empty!")
+
+        result = mappings_default.copy()
+
+        if not result.keys().isdisjoint(mappings_set.keys()):
+            raise RuntimeError(f"duplicate keys: {result.keys() & mappings_set.keys()}")
+        
+        # insert all set mappings
+        for k, vs in mappings_set.items():
+            result[k] = separator.join(vs)
+
+        # append all add mappings
+        for k, vs in mappings_add.items():
+            if k in result:
+                result[k] = separator.join([ result[k] ] + vs)
+            else:
+                result[k] = separator.join(vs)
+
+        return result
+
+    def effective_environment(
+            self, default_environment: dict[str, str] = {}, separator: str = " ") -> dict[str, str]:
+        return BuildSystemArguments.__effective_mapping(default_environment, self.environment_set, self.environment_add, separator)
+
+    def effective_properties(
+            self, default_property: dict[str, str] = {}, separator: str = " ") -> dict[str, str]:
+        return BuildSystemArguments.__effective_mapping(default_property, self.property_set, self.property_add, separator)
+
+
+@dataclass
+class FeatureConfigBoolean(DataClassYAMLMixin):
+    enabled: BuildSystemArguments
+    disabled: BuildSystemArguments
+
+
+@dataclass
 class BuildResult(DataClassYAMLMixin):
     directory: str
     docker_image: str
@@ -177,19 +266,20 @@ class RunConfig(DataClassYAMLMixin):
     build_system: BuildSystem
     source_directory: str
     cpu_architecture: CPUArchitecture
-    features_boolean: dict[FeatureType, tuple[str, str]]
-    features_select: dict[str, dict[str, str]]
-    additional_args: list[str]
+    features_boolean: dict[FeatureType, FeatureConfigBoolean]
+    features_select: dict[str, dict[str, BuildSystemArguments]]
+    build_args: BuildSystemArguments
+    # TODO: jrabil: what is this?
     additional_steps: list[str]
     layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
-    @staticmethod
-    def load(config_path: str) -> RunConfig:
+    @classmethod
+    def load(cls, config_path: str) -> RunConfig:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
 
         with open(config_path) as f:
-            return RunConfig.from_yaml(f)
+            return cls.from_yaml(f)
 
     def save(self, config_path: str) -> None:
         with open(config_path, "w") as f:
@@ -197,9 +287,7 @@ class RunConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
-        obj.layers_deps = copy.deepcopy(instance.layers_deps)
-        return obj
+        return cls.from_dict(instance.to_dict())
 
 
 @dataclass
@@ -207,7 +295,6 @@ class DeployConfig(DataClassYAMLMixin):
     ir_image: str
     working_directory: str
     cpu_architecture: CPUArchitecture
-    features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
     features_versions: dict[FeatureType, str]
     features_select: dict[str, str]
@@ -230,7 +317,7 @@ class DeployConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        return cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
 
 
 @dataclass
@@ -255,7 +342,7 @@ class SourceContainerConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
         return obj
 
 
@@ -317,5 +404,5 @@ class SourceDeploymentConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
         return obj

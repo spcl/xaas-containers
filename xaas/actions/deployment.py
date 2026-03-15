@@ -65,15 +65,6 @@ class Deployment(Action):
                     )
                 )
 
-        for feature in config.features_enabled:
-            if feature in XaaSConfig().layers.layers[config.cpu_architecture]:
-                layers_to_add.append(
-                    (
-                        XaaSConfig().layers.layers[config.cpu_architecture][feature],
-                        config.features_versions[feature],
-                    )
-                )
-
         for layer, version in layers_to_add:
             layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(

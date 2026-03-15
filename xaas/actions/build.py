@@ -5,10 +5,11 @@ import os
 import subprocess
 from dataclasses import dataclass
 from dataclasses import field
+from functools import reduce
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -26,19 +27,13 @@ class CPUTuningFeatures(DataClassYAMLMixin):
     tune_cpu: str | None = None
 
 
+# TODO: jrabil: i don't think this stuff should extend from RunConfig, it should be a separate config file...
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
+    # TODO: jrabil: this should probably be moved to RunConfig
     docker_image: str = "builder-19-cross"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
-
-    @staticmethod
-    def load(config_path: str) -> Config:
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
-
-        with open(config_path) as f:
-            return Config.from_yaml(f)
 
 
 class BuildGenerator(Action):
@@ -237,13 +232,17 @@ class BuildGenerator(Action):
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
 
+                arguments = reduce(BuildSystemArguments.merge, [
+                    run_config.build_args,
+                    *[ run_config.features_boolean[arg].enabled for arg in active ],
+                    *[ run_config.features_boolean[arg].disabled for arg in nonactive ],
+                    # TODO: add arguments for select-style features
+                ])
+
                 cmake_args = []
-                for arg in active:
-                    cmake_args.append(f"-D{run_config.features_boolean[arg][0]}")
-                for arg in nonactive:
-                    cmake_args.append(f"-D{run_config.features_boolean[arg][1]}")
-                for arg in run_config.additional_args:
-                    cmake_args.append(f"-D{arg}")
+
+                for k, v in arguments.effective_properties().items():
+                    cmake_args.append(f"-D{k}={v}")
 
                 for arg in flag:
                     if arg is not None:
