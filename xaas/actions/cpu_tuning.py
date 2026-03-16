@@ -226,7 +226,7 @@ class CPUTuning(Action):
 
         finally:
             for container in containers.values():
-                container.container.stop(timeout=0)
+                container.container.remove(force=True)
 
         config_path = os.path.join(config.build.working_directory, "cpu_tuning.yml")
         config.save(config_path)
