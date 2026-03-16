@@ -8,7 +8,7 @@ from dataclasses import field
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult
+from xaas.config import BuildResult, TargetTriple
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -29,8 +29,7 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
-    docker_image: str = "builder"
-    docker_image_dev: str = "builder-19-dev"
+    docker_image: str = "builder-19-cross"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
     @staticmethod
@@ -48,7 +47,7 @@ class BuildGenerator(Action):
 
     def _generate_docker_image(
         self,
-        docker_image_dev: str,
+        docker_image: str,
         layers_deps: dict[str, LayerDepConfig],
         cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
@@ -76,7 +75,7 @@ class BuildGenerator(Action):
 
             lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}")
 
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image_dev}")
+        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image}")
 
         for dep, dep_name in dep_names:
             dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep]
@@ -192,7 +191,7 @@ class BuildGenerator(Action):
             for active, nonactive in subsets:
                 build_dir = self.generate_name(active, option)
 
-                docker_image = f"{run_config.docker_image_dev}"
+                docker_image = f"{run_config.docker_image}"
 
                 if len(run_config.layers_deps) > 0:
                     logging.info(
@@ -206,7 +205,7 @@ class BuildGenerator(Action):
                         settings[k] = v
 
                     dockerfile_content, flag_names = self._generate_docker_image(
-                        run_config.docker_image_dev,
+                        run_config.docker_image,
                         run_config.layers_deps,
                         run_config.cpu_architecture,
                         settings,
@@ -220,12 +219,12 @@ class BuildGenerator(Action):
                         f.write(dockerfile_content)
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
-                    logging.info(
-                        f"[{self.name}] Building Docker image: {run_config.docker_image}, in {working_dir}"
-                    )
-
                     if len(name_suffix) > 0:
                         docker_image = f"{docker_image}-{name_suffix}"
+
+                    logging.info(
+                        f"[{self.name}] Building Docker image: {docker_image}, in {working_dir}"
+                    )
 
                     self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
@@ -250,6 +249,19 @@ class BuildGenerator(Action):
                     if arg is not None:
                         cmake_args.append(f"-D{arg}")
 
+                target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
+
+                toolchain_file_name = "toolchain.cmake"
+                toolchain_file = os.path.join(new_dir, toolchain_file_name)
+                toolchain_lines = [
+                    "set(CMAKE_C_COMPILER clang)",
+                    "set(CMAKE_CXX_COMPILER clang++)",
+                    f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
+                    f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+                ]
+                with open(toolchain_file, "w") as toolchain_output:
+                    toolchain_output.write('\n'.join(toolchain_lines))
+
                 logging.info(
                     f"Executing build in {new_dir}, image {docker_image}, combination: {active}"
                 )
@@ -258,6 +270,7 @@ class BuildGenerator(Action):
                     "bash",
                     "-c",
                     "'cmake",
+                    f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                     *cmake_args,

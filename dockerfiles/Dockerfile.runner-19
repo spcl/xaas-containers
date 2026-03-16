@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# configure apt-get!
+# prevent packages from blocking installation with interaction requests
+# also, make apt keep downloaded package files locally so that they get kept in the build cache
+RUN apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/* /var/lib/apt/* /var/log/apt/* \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# install eatmydata for Speed:tm:
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    apt-get update && apt-get install -y eatmydata
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+RUN eatmydata apt-get update && eatmydata apt-get install -y \
+    libomp5-19

@@ -45,6 +45,11 @@ class Runner:
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise
+        except docker.errors.BuildError as e:
+            logging.error(f"Docker build error: {str(e)}")
+            for it in e.build_log:
+                logging.error(f"\t{it}")
+            raise
 
     def run(
         self,
