@@ -21,7 +21,7 @@ def test_load_lulesh() -> None:
     assert cfg.source_directory == "LULESH"
     assert cfg.project_name == "LULESH"
     assert cfg.build_system == BuildSystem.CMAKE
-    assert cfg.features_boolean[FeatureType.MPI].enabled.property_set == {"WITH_MPI": ["ON"]}
-    assert cfg.features_boolean[FeatureType.MPI].disabled.property_set == {"WITH_MPI": ["OFF"]}
-    assert cfg.features_boolean[FeatureType.OPENMP].enabled.property_set == {"WITH_OPENMP": ["ON"]}
-    assert cfg.features_boolean[FeatureType.OPENMP].disabled.property_set == {"WITH_OPENMP": ["OFF"]}
+    assert cfg.all_targets.features_boolean[FeatureType.MPI].enabled.property_set == {"WITH_MPI": ["ON"]}
+    assert cfg.all_targets.features_boolean[FeatureType.MPI].disabled.property_set == {"WITH_MPI": ["OFF"]}
+    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].enabled.property_set == {"WITH_OPENMP": ["ON"]}
+    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].disabled.property_set == {"WITH_OPENMP": ["OFF"]}

@@ -9,6 +9,8 @@ from pathlib import Path
 import yaml
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
+from xaas.util.dict_utils import union_distinct, union_merge
+
 
 class CPUArchitecture(str, Enum):
     X86_64 = "x86_64"
@@ -163,47 +165,19 @@ class BuildSystemArguments(DataClassYAMLMixin):
     arguments_add: list[str] = field(default_factory=list)
 
     @staticmethod
-    def __merge_set(a: dict[str, list[str]], b: dict[str, list[str]]) -> dict[str, list[str]]:
-        if not a.keys().isdisjoint(b.keys()):
-            raise RuntimeError(f"duplicate keys: {a.keys() & b.keys()}")
-
-        return a | b
-
-    @staticmethod
-    def __merge_add(a: dict[str, list[str]], b: dict[str, list[str]]) -> dict[str, list[str]]:
-        res = a | b
-        for k in a.keys() & b.keys():
-            res[k] = a[k] + b[k]
-        return res
-
-    @staticmethod
     def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
-        res = BuildSystemArguments()
+        return BuildSystemArguments(
+            # merge *_set mappings, throwing an exception if the same key is present in both
+            environment_set = union_distinct(a.environment_set, b.environment_set),
+            property_set = union_distinct(a.property_set, b.property_set),
 
-        # merge *_set mappings, throwing an exception if the same key is present in both
+            # merge *_add mappings, concatenating the values if the same key is present in both
+            environment_add = union_merge(a.environment_add, b.environment_add, list.__add__),
+            property_add = union_merge(a.property_add, b.property_add, list.__add__),
 
-        res.environment_set = a.environment_set | b.environment_set
-        if not a.environment_set.keys().isdisjoint(b.environment_set.keys()):
-            raise RuntimeError(f"duplicate keys in environment_set: {a.environment_set.keys() & b.environment_set.keys()}")
-
-        res.property_set = a.property_set | b.property_set
-        if not a.property_set.keys().isdisjoint(b.property_set.keys()):
-            raise RuntimeError(f"duplicate keys in property_set: {a.property_set.keys() & b.property_set.keys()}")
-
-        # merge *_add mappings, concatenating the values if the same key is present in both
-
-        res.environment_add = a.environment_add | b.environment_add
-        for k in a.environment_add.keys() & b.environment_add.keys():
-            res.environment_add[k] = a.environment_add[k] + b.environment_add[k]
-
-        res.property_add = a.property_add | b.property_add
-        for k in a.property_add.keys() & b.property_add.keys():
-            res.property_add[k] = a.property_add[k] + b.property_add[k]
-
-        # simply concatenate any additional arguments
-        res.arguments_add = a.arguments_add + b.arguments_add
-
-        return res
+            # simply concatenate any additional arguments
+            arguments_add = a.arguments_add + b.arguments_add,
+        )
 
     @staticmethod
     def __effective_mapping(
@@ -212,11 +186,8 @@ class BuildSystemArguments(DataClassYAMLMixin):
         if not separator:
             raise RuntimeError("separator string must not be empty!")
 
-        result = mappings_default.copy()
+        result = union_distinct(mappings_default, mappings_set)
 
-        if not result.keys().isdisjoint(mappings_set.keys()):
-            raise RuntimeError(f"duplicate keys: {result.keys() & mappings_set.keys()}")
-        
         # insert all set mappings
         for k, vs in mappings_set.items():
             result[k] = separator.join(vs)
@@ -244,13 +215,16 @@ class FeatureConfigBoolean(DataClassYAMLMixin):
     enabled: BuildSystemArguments
     disabled: BuildSystemArguments
 
+    def args_for_state(self, state: bool) -> BuildSystemArguments:
+        return self.enabled if state else self.disabled
+
 
 @dataclass
 class BuildResult(DataClassYAMLMixin):
     directory: str
     docker_image: str
-    features_boolean: list[FeatureType]
-    features_select: dict[FeatureSelectionType, str] = field(default_factory=dict)
+    features_boolean: dict[FeatureType, bool]
+    features_select: dict[str, str]
 
 
 @dataclass
@@ -260,17 +234,34 @@ class LayerDepConfig(DataClassYAMLMixin):
 
 
 @dataclass
+class PartialRunConfig(DataClassYAMLMixin):
+    """
+    Defines a set of features and other build system arguments for a RunConfig.
+    """
+
+    features_boolean: dict[FeatureType, FeatureConfigBoolean]
+    features_select: dict[str, dict[str, BuildSystemArguments]]
+    build_args: BuildSystemArguments
+
+    @staticmethod
+    def merge(a: PartialRunConfig, b: PartialRunConfig) -> PartialRunConfig:
+        return PartialRunConfig(
+            features_boolean = union_distinct(a.features_boolean, b.features_boolean),
+            features_select = union_distinct(a.features_select, b.features_select),
+            build_args = BuildSystemArguments.merge(a.build_args, b.build_args),
+        )
+
+
+@dataclass
 class RunConfig(DataClassYAMLMixin):
     working_directory: str
     project_name: str
     build_system: BuildSystem
     source_directory: str
     cpu_architecture: CPUArchitecture
-    features_boolean: dict[FeatureType, FeatureConfigBoolean]
-    features_select: dict[str, dict[str, BuildSystemArguments]]
-    build_args: BuildSystemArguments
-    # TODO: jrabil: what is this?
-    additional_steps: list[str]
+    all_targets: PartialRunConfig
+    cpu_specific: dict[CPUArchitecture, PartialRunConfig]
+    additional_steps: list[list[str]]
     layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
     @classmethod
@@ -288,6 +279,29 @@ class RunConfig(DataClassYAMLMixin):
     @classmethod
     def from_instance(cls, instance):
         return cls.from_dict(instance.to_dict())
+
+    def for_target(self, cpu_architecture: CPUArchitecture) -> PartialRunConfig:
+        """
+        Gets the PartialRunConfig for a specific CPU architecture.
+        """
+        if cpu_architecture in self.cpu_specific:
+            return PartialRunConfig.merge(self.all_targets, self.cpu_specific[cpu_architecture])
+        else:
+            return self.all_targets
+
+    def may_contain_feature_boolean(self, feature: FeatureType) -> bool:
+        """
+        Checks if any permutations of this configuration may contain the given boolean feature.
+        """
+
+        if self.all_targets.features_boolean.get(feature, False):
+            return True
+
+        for cfg in self.cpu_specific.values():
+            if cfg.features_boolean.get(feature, False):
+                return True
+
+        return False
 
 
 @dataclass

@@ -60,6 +60,7 @@ class Runner:
         detach: bool = True,
         remove: bool = True,
         tty: bool = False,
+        environment: dict[str, str] | None = None,
     ) -> Container:
         try:
             volumes = {}
@@ -74,6 +75,9 @@ class Runner:
                 "USER_ID": str(self.uid),
                 "GROUP_ID": str(self.gid),
             }
+
+            if environment is not None:
+                envs |= environment
 
             container = self.client.containers.run(
                 image=image,

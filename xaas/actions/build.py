@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import subprocess
 from dataclasses import dataclass
 from dataclasses import field
 from functools import reduce
+from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, BuildSystemArguments
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -85,7 +87,7 @@ class BuildGenerator(Action):
         config_obj = Config.from_instance(run_config)
 
         # simple check for cuda runtime dependency
-        if FeatureType.CUDA in config_obj.features_boolean:
+        if config_obj.may_contain_feature_boolean(FeatureType.CUDA):
             output = subprocess.run(
                 f"grep CUDART_VERSION -nrw {config_obj.source_directory}",
                 capture_output=True,
@@ -123,7 +125,7 @@ class BuildGenerator(Action):
     @staticmethod
     def _generate_subsets(
         features: list[FeatureType],
-    ) -> list[list[tuple[FeatureType, FeatureType]]]:
+    ) -> list[dict[FeatureType, bool]]:
         features_count = len(features)
         num_subsets = 2**features_count
         all_subsets = []
@@ -132,59 +134,48 @@ class BuildGenerator(Action):
         We generate all 2^n combinations by using bit positions of all integers from 0 to 2^n - 1
         """
         for i in range(num_subsets):
-            subset = []
-            subset_not_active = []
+            states : dict[FeatureType, bool] = dict()
             for j in range(features_count):
-                if i & (1 << j) > 0:
-                    subset.append(features[j])
-                else:
-                    subset_not_active.append(features[j])
-            all_subsets.append((subset, subset_not_active))
+                states[features[j]] = i & (1 << j) > 0
+            all_subsets.append(states)
 
         return all_subsets
 
     @staticmethod
-    def generate_name(active: list[FeatureType], flags: tuple[str | None]):
-        active_name = "_".join([x.value for x in active])
-        flags_name = "_".join(flags) if flags[0] is not None else None
+    def _all_feature_permutations(config: PartialRunConfig) -> Generator[tuple[dict[FeatureType, bool], dict[str, str]], None, None]:
+        permutations_boolean = [
+            [tuple([feature, False]), tuple([feature, True])] for feature in config.features_boolean.keys()
+        ]
 
-        if flags_name is not None:
-            return f"{active_name}_{flags_name}"
-        else:
-            return active_name
+        permutations_select = [
+            [ tuple([k, v]) for v in values ] for k, values in config.features_select.items()
+        ]
+
+        for states_boolean in itertools.product(*permutations_boolean):
+            for states_select in itertools.product(*permutations_select):
+                yield dict(states_boolean), dict(states_select)
+
+    @staticmethod
+    def generate_name(states_boolean: dict[FeatureType, bool], states_select: dict[str, str]) -> str:
+        return "_".join([
+            *[x.value for x, state in states_boolean.items() if state],
+            *[f"{k}-{v}" for k, v in states_select.items()]
+        ])
 
     def _build_cmake(self, run_config: Config) -> bool:
-        build_dir = os.path.join(run_config.working_directory, "build")
-
-        # generate all combinations
-        subsets = self._generate_subsets(list(run_config.features_boolean.keys()))
-
         containers = []
-
-        options_names = []
-        options_select = []
-        options_select_flags = []
-
-        for key, selection in run_config.features_select.items():
-            for name, option in selection.items():
-                options_names.append((key,))
-                options_select.append((name,))
-                options_select_flags.append((option,))
-
-        if len(options_select) == 0:
-            options_names.append((None,))
-            options_select.append((None,))
-            options_select_flags.append((None,))
 
         # FIXME: test it for multiple combinations
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
-        for option_name, option, flag in zip(
-            options_names, options_select, options_select_flags, strict=True
-        ):
-            for active, nonactive in subsets:
-                build_dir = self.generate_name(active, option)
+        #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid
+        if True:
+            # TODO: jrabil: automatically build for multiple configurations
+            effective_run_config = run_config.for_target(run_config.cpu_architecture)
+
+            for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
+                build_dir = self.generate_name(states_boolean, states_select)
 
                 docker_image = f"{run_config.docker_image}"
 
@@ -194,16 +185,12 @@ class BuildGenerator(Action):
                     )
 
                     docker_image = f"{run_config.docker_image}-{run_config.project_name}"
-                    # FIXME: support multiple values
-                    settings = {}
-                    for k, v in zip(option_name, option, strict=True):
-                        settings[k] = v
 
                     dockerfile_content, flag_names = self._generate_docker_image(
                         run_config.docker_image,
                         run_config.layers_deps,
                         run_config.cpu_architecture,
-                        settings,
+                        states_select,
                     )
                     name_suffix = "_".join(flag_names)
 
@@ -233,20 +220,25 @@ class BuildGenerator(Action):
                 os.makedirs(new_dir, exist_ok=True)
 
                 arguments = reduce(BuildSystemArguments.merge, [
-                    run_config.build_args,
-                    *[ run_config.features_boolean[arg].enabled for arg in active ],
-                    *[ run_config.features_boolean[arg].disabled for arg in nonactive ],
-                    # TODO: add arguments for select-style features
+                    # universal build arguments
+                    effective_run_config.build_args,
+
+                    # include build arguments for the current feature selection
+                    *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
+                    *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
                 ])
 
-                cmake_args = []
+                cmake_args = [
+                    # properties from the build arguments should be defined as CMake variables
+                    *[ f"-D{k}={v}" for k, v in arguments.effective_properties().items() ],
 
-                for k, v in arguments.effective_properties().items():
-                    cmake_args.append(f"-D{k}={v}")
+                    # additional CMake arguments
+                    *arguments.arguments_add,
+                ]
 
-                for arg in flag:
-                    if arg is not None:
-                        cmake_args.append(f"-D{arg}")
+                # environment variables from the build arguments should be defined when running CMake
+                # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
+                cmake_environment = arguments.effective_environment()
 
                 target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
 
@@ -262,9 +254,10 @@ class BuildGenerator(Action):
                     toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
-                    f"Executing build in {new_dir}, image {docker_image}, combination: {active}"
+                    f"Executing build in {new_dir}, image {docker_image}, combination: {states_boolean | states_select}"
                 )
 
+                # TODO: jrabil: we probably need to make sure to quote-escape all the strings here
                 configure_cmd = [
                     "bash",
                     "-c",
@@ -281,7 +274,8 @@ class BuildGenerator(Action):
                     "cd /build",
                 ]
                 for additional_step in run_config.additional_steps:
-                    configure_cmd.append(f"&& {additional_step}")
+                    configure_cmd.append("&&")
+                    configure_cmd.extend(additional_step)
                 configure_cmd.append("'")
                 logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
 
@@ -294,7 +288,9 @@ class BuildGenerator(Action):
                 volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
 
                 res = BuildResult(
-                    docker_image=docker_image, directory=new_dir, features_boolean=active
+                    docker_image=docker_image, directory=new_dir,
+                    features_boolean=states_boolean,
+                    features_select=states_select
                 )
 
                 containers.append(
@@ -302,6 +298,7 @@ class BuildGenerator(Action):
                         self.docker_runner.run(
                             image=docker_image,
                             command=" ".join(configure_cmd),
+                            environment=cmake_environment,
                             mounts=volumes,
                             remove=False,
                             working_dir="/build",

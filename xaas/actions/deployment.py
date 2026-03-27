@@ -19,12 +19,7 @@ class Deployment(Action):
         self.parallel_workers = parallel_workers
 
     def execute(self, config: DeployConfig) -> bool:
-        active = [x for x, val in config.features_boolean.items() if val]
-        flags = [val for x, val in config.features_select.items()]
-
-        if len(flags) == 0:
-            flags.append(None)
-        name = BuildGenerator.generate_name(active, flags)
+        name = BuildGenerator.generate_name(config.features_boolean, config.features_select)
 
         dockerfile_path = os.path.join(config.working_directory, name)
         os.makedirs(dockerfile_path, exist_ok=True)
