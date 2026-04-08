@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import shlex
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import yaml
+from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 from xaas.util.dict_utils import union_distinct, union_merge
@@ -156,58 +159,138 @@ class FeatureSelectionType(Enum):
     VECTORIZATION = "VECTORIZATION"
 
 
+class ArgumentsVariableEntryType(Enum):
+    APPEND = "append"
+    SET = "set"
+
+
+@dataclass
+class ArgumentsVariableEntry(DataClassYAMLMixin):
+    type: ArgumentsVariableEntryType
+    value: str
+    separator: str = field(default="")
+
+    class Config(BaseConfig):
+        # Don't include separator when it's left as the default
+        omit_default = True
+
+    @classmethod
+    def __pre_deserialize__(cls, arg):
+        if isinstance(arg, str):
+            # For convenience, a plain string value can be implicitly converted into a 'SET' entry
+            return { "type": "set", "value": arg }
+        else:
+            return arg
+
+    @staticmethod
+    def merge(a: ArgumentsVariableEntry, b: ArgumentsVariableEntry) -> ArgumentsVariableEntry:
+        # We can combine two set directives if they have the same value
+        if a.type is ArgumentsVariableEntryType.SET and b.type is ArgumentsVariableEntryType.SET:
+            if a.value != b.value:
+                raise RuntimeError(f"Cannot set variable with different values: '{a.value}' and '{b.value}'")
+
+            return ArgumentsVariableEntry(
+                type=ArgumentsVariableEntryType.SET,
+                value=a.value,
+            )
+
+        # We can combine two append directives as long as they both use the same separator
+        if a.type is ArgumentsVariableEntryType.APPEND and b.type is ArgumentsVariableEntryType.APPEND:
+            if a.separator != b.separator:
+                raise RuntimeError(f"Mismatched separators: '{a.separator}' and '{b.separator}'")
+
+            return ArgumentsVariableEntry(
+                type=ArgumentsVariableEntryType.APPEND,
+                value=f"{a.value}{b.separator}{b.value}",
+                separator=a.separator,
+            )
+
+        # Refuse to handle any other combination
+        raise RuntimeError(f"Mismatched variable update types: {a} and {b}")
+
+    def to_shell_export(self, name: str) -> list[str]:
+        """
+        Gets a shell 'export' command which sets or updates this variable's value.
+
+        Returns a single quoted shell command.
+        """
+
+        if self.type is ArgumentsVariableEntryType.APPEND:
+            return [ "export", f'{name}="${{{name}}}${{{name}:+{self.separator}}}"{shlex.quote(self.value)}' ]
+        elif self.type is ArgumentsVariableEntryType.SET:
+            return [ "export", f'{name}={shlex.quote(self.value)}' ]
+        else:
+            raise RuntimeError(f"Unknown type: {self.type}")
+
+    @staticmethod
+    def reduce_to_dict(entries: dict[str, ArgumentsVariableEntry], defaults: dict[str, str]) -> dict[str, str]:
+        """
+        Reduces a group of argument variables down to a single dict containing the effective key-value mappings.
+
+        :param entries: the argument variable entries
+        :param defaults: a dict containing the inherited initial variable values
+        """
+
+        result: dict[str, str] = {}
+        for name, entry in entries.items():
+            if entry.type is ArgumentsVariableEntryType.APPEND:
+                if name in defaults:
+                    result[name] = f"{defaults[name]}{entry.separator}{entry.value}"
+                else:
+                    result[name] = entry.value
+            elif entry.type is ArgumentsVariableEntryType.SET:
+                result[name] = entry.value
+            else:
+                raise RuntimeError(f"Unknown type: {entry.type}")
+        return result
+
+    @staticmethod
+    def reduce_to_cmake(entries: dict[str, ArgumentsVariableEntry]) -> list[str]:
+        """
+        Reduces a group of argument variables down to a list of CMake code lines.
+
+        :param entries: the argument variable entries
+        """
+
+        result: list[str] = []
+        for name, entry in entries.items():
+            if entry.type is ArgumentsVariableEntryType.SET:
+                result.extend([
+                    f"if (NOT DEFINED {name})",
+                    f"    set({name} \"{entry.value}\")",
+                    f"else()",
+                    f"    message(FATAL_ERROR, \"CMake variable {name} was already set to '${{{name}}}'\")",
+                    f"endif()",
+                ])
+            elif entry.type is ArgumentsVariableEntryType.APPEND:
+                result.extend([
+                    f"if (NOT DEFINED {name})",
+                    f"    set({name} \"{entry.value}\")",
+                    f"else()",
+                    f"    set({name} \"${{{name}}}{entry.separator}{entry.value}\")",
+                    f"endif()",
+                ])
+            else:
+                raise RuntimeError(f"Unknown type: {entry.type}")
+        return result
+
+
 @dataclass
 class BuildSystemArguments(DataClassYAMLMixin):
-    environment_set: dict[str, list[str]] = field(default_factory=dict)
-    environment_add: dict[str, list[str]] = field(default_factory=dict)
-    property_set: dict[str, list[str]] = field(default_factory=dict)
-    property_add: dict[str, list[str]] = field(default_factory=dict)
-    arguments_add: list[str] = field(default_factory=list)
+    environment: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    property: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+
+    arguments: list[str] = field(default_factory=list)
 
     @staticmethod
     def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
         return BuildSystemArguments(
-            # merge *_set mappings, throwing an exception if the same key is present in both
-            environment_set = union_distinct(a.environment_set, b.environment_set),
-            property_set = union_distinct(a.property_set, b.property_set),
-
-            # merge *_add mappings, concatenating the values if the same key is present in both
-            environment_add = union_merge(a.environment_add, b.environment_add, list.__add__),
-            property_add = union_merge(a.property_add, b.property_add, list.__add__),
+            environment = union_merge(a.environment, b.environment, ArgumentsVariableEntry.merge),
+            property = union_merge(a.property, b.property, ArgumentsVariableEntry.merge),
 
             # simply concatenate any additional arguments
-            arguments_add = a.arguments_add + b.arguments_add,
+            arguments = a.arguments + b.arguments,
         )
-
-    @staticmethod
-    def __effective_mapping(
-            mappings_default: dict[str, str], mappings_set: dict[str, list[str]], mappings_add: dict[str, list[str]],
-            separator: str) -> dict[str, str]:
-        if not separator:
-            raise RuntimeError("separator string must not be empty!")
-
-        result = union_distinct(mappings_default, mappings_set)
-
-        # insert all set mappings
-        for k, vs in mappings_set.items():
-            result[k] = separator.join(vs)
-
-        # append all add mappings
-        for k, vs in mappings_add.items():
-            if k in result:
-                result[k] = separator.join([ result[k] ] + vs)
-            else:
-                result[k] = separator.join(vs)
-
-        return result
-
-    def effective_environment(
-            self, default_environment: dict[str, str] = {}, separator: str = " ") -> dict[str, str]:
-        return BuildSystemArguments.__effective_mapping(default_environment, self.environment_set, self.environment_add, separator)
-
-    def effective_properties(
-            self, default_property: dict[str, str] = {}, separator: str = " ") -> dict[str, str]:
-        return BuildSystemArguments.__effective_mapping(default_property, self.property_set, self.property_add, separator)
 
 
 @dataclass

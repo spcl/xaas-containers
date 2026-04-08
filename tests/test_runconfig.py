@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from xaas.config import BuildSystem
+from xaas.config import BuildSystem, ArgumentsVariableEntry, ArgumentsVariableEntryType
 from xaas.config import FeatureType
 from xaas.config import RunConfig
 
@@ -21,7 +21,7 @@ def test_load_lulesh() -> None:
     assert cfg.source_directory == "LULESH"
     assert cfg.project_name == "LULESH"
     assert cfg.build_system == BuildSystem.CMAKE
-    assert cfg.all_targets.features_boolean[FeatureType.MPI].enabled.property_set == {"WITH_MPI": ["ON"]}
-    assert cfg.all_targets.features_boolean[FeatureType.MPI].disabled.property_set == {"WITH_MPI": ["OFF"]}
-    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].enabled.property_set == {"WITH_OPENMP": ["ON"]}
-    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].disabled.property_set == {"WITH_OPENMP": ["OFF"]}
+    assert cfg.all_targets.features_boolean[FeatureType.MPI].enabled.property == {"WITH_MPI": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "ON")}
+    assert cfg.all_targets.features_boolean[FeatureType.MPI].disabled.property == {"WITH_MPI": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "OFF")}
+    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].enabled.property == {"WITH_OPENMP": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "ON")}
+    assert cfg.all_targets.features_boolean[FeatureType.OPENMP].disabled.property == {"WITH_OPENMP": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "OFF")}

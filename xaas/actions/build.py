@@ -3,6 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from dataclasses import field
@@ -11,7 +12,7 @@ from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -169,7 +170,7 @@ class BuildGenerator(Action):
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
-        #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid
+        #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid messing up the indentation
         if True:
             # TODO: jrabil: automatically build for multiple configurations
             effective_run_config = run_config.for_target(run_config.cpu_architecture)
@@ -228,17 +229,9 @@ class BuildGenerator(Action):
                     *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
                 ])
 
-                cmake_args = [
-                    # properties from the build arguments should be defined as CMake variables
-                    *[ f"-D{k}={v}" for k, v in arguments.effective_properties().items() ],
-
-                    # additional CMake arguments
-                    *arguments.arguments_add,
-                ]
-
                 # environment variables from the build arguments should be defined when running CMake
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
-                cmake_environment = arguments.effective_environment()
+                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(f"{XaaSConfig().docker_repository}:{docker_image}"))
 
                 target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
 
@@ -249,6 +242,9 @@ class BuildGenerator(Action):
                     "set(CMAKE_CXX_COMPILER clang++)",
                     f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
                     f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+
+                    # properties from the build arguments should be defined as CMake variables
+                    *ArgumentsVariableEntry.reduce_to_cmake(arguments.property),
                 ]
                 with open(toolchain_file, "w") as toolchain_output:
                     toolchain_output.write('\n'.join(toolchain_lines))
@@ -257,27 +253,28 @@ class BuildGenerator(Action):
                     f"Executing build in {new_dir}, image {docker_image}, combination: {states_boolean | states_select}"
                 )
 
-                # TODO: jrabil: we probably need to make sure to quote-escape all the strings here
-                configure_cmd = [
-                    "bash",
-                    "-c",
-                    "'cmake",
+                cmake_command: list[str] = [
+                    "cmake",
                     f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-                    *cmake_args,
+
+                    # additional CMake arguments
+                    *arguments.arguments,
+
                     "-S",
                     "/source",
                     "-B",
                     "/build",
-                    "&&",
-                    "cd /build",
                 ]
-                for additional_step in run_config.additional_steps:
-                    configure_cmd.append("&&")
-                    configure_cmd.extend(additional_step)
-                configure_cmd.append("'")
-                logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
+
+                configure_commands: list[list[str]] = [
+                    cmake_command,
+                    *run_config.additional_steps,
+                ]
+
+                configure_cmd: str = " && ".join([ shlex.join(command) for command in configure_commands ])
+                logging.info(f"[{self.name}] Running: {configure_cmd}")
 
                 volumes = []
                 volumes.append(
@@ -297,7 +294,7 @@ class BuildGenerator(Action):
                     (
                         self.docker_runner.run(
                             image=docker_image,
-                            command=" ".join(configure_cmd),
+                            command=[ "bash", "-c", configure_cmd ],
                             environment=cmake_environment,
                             mounts=volumes,
                             remove=False,

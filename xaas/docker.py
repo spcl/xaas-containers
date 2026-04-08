@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import docker
 from docker.models.containers import Container
+from docker.models.images import Image
 
 
 @dataclass
@@ -54,7 +55,7 @@ class Runner:
     def run(
         self,
         image: str,
-        command: str,
+        command: str | list[str],
         working_dir: str,
         mounts: list[VolumeMount] | None = None,
         detach: bool = True,
@@ -69,6 +70,7 @@ class Runner:
                     volumes[mount.source] = {"bind": mount.target, "mode": mount.mode}
             logging.debug(f"Starting container from image '{image}'")
 
+            # TODO: jrabil: we should make the base docker image be defined explicitly
             image = f"{self.docker_repository}:{image}"
 
             envs = {
@@ -109,3 +111,16 @@ class Runner:
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise
+
+    def get_image(self, image: str) -> Image:
+        return self.client.images.get(image)
+
+    def get_image_env(self, image: str | Image) -> dict[str, str]:
+        if isinstance(image, str):
+            image = self.get_image(image)
+
+        result: dict[str, str] = {}
+        for item in image.attrs["Config"]["Env"]:
+            name, value = item.split("=", 1)
+            result[name] = value
+        return result

@@ -7,18 +7,20 @@ all_targets:
   features_boolean:
     MPI:
       enabled:
-        property_set:
-          WITH_MPI: ['ON']
+        property:
+          WITH_MPI:
+            type: set
+            value: 'ON'
       disabled:
-        property_set:
-          WITH_MPI: ['OFF']
+        property:
+          WITH_MPI: 'OFF'
     OPENMP:
       enabled:
-        property_set:
-          WITH_OPENMP: ['ON']
+        property:
+          WITH_OPENMP: 'ON'
       disabled:
-        property_set:
-          WITH_OPENMP: ['OFF']
+        property:
+          WITH_OPENMP: 'OFF'
   features_select: {}
   build_args: {}
 cpu_specific:
