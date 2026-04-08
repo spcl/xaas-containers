@@ -6,13 +6,17 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import yaml
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
 from xaas.util.dict_utils import union_distinct, union_merge
+
+
+class BaseXaasConfigModel(DataClassYAMLMixin):
+    class Config(BaseConfig):
+        forbid_extra_keys = True
 
 
 class CPUArchitecture(str, Enum):
@@ -62,13 +66,13 @@ class Language(str, Enum):
 
 
 @dataclass
-class DockerLayerVersion(DataClassYAMLMixin):
+class DockerLayerVersion(BaseXaasConfigModel):
     flag_name: str
     build_args: dict[str, str]
 
 
 @dataclass
-class DockerLayer(DataClassYAMLMixin):
+class DockerLayer(BaseXaasConfigModel):
     dockerfile: str
     name: str
     versions: list[str]
@@ -80,7 +84,7 @@ class DockerLayer(DataClassYAMLMixin):
 
 
 @dataclass
-class DockerLayers(DataClassYAMLMixin):
+class DockerLayers(BaseXaasConfigModel):
     layers: dict[CPUArchitecture, dict[FeatureType, DockerLayer]]
     layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]]
 
@@ -165,12 +169,12 @@ class ArgumentsVariableEntryType(Enum):
 
 
 @dataclass
-class ArgumentsVariableEntry(DataClassYAMLMixin):
+class ArgumentsVariableEntry(BaseXaasConfigModel):
     type: ArgumentsVariableEntryType
     value: str
-    separator: str = field(default="")
+    separator: str = ""
 
-    class Config(BaseConfig):
+    class Config(BaseXaasConfigModel.Config):
         # Don't include separator when it's left as the default
         omit_default = True
 
@@ -276,7 +280,7 @@ class ArgumentsVariableEntry(DataClassYAMLMixin):
 
 
 @dataclass
-class BuildSystemArguments(DataClassYAMLMixin):
+class BuildSystemArguments(BaseXaasConfigModel):
     environment: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     property: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
 
@@ -294,7 +298,7 @@ class BuildSystemArguments(DataClassYAMLMixin):
 
 
 @dataclass
-class FeatureConfigBoolean(DataClassYAMLMixin):
+class FeatureConfigBoolean(BaseXaasConfigModel):
     enabled: BuildSystemArguments
     disabled: BuildSystemArguments
 
@@ -303,7 +307,7 @@ class FeatureConfigBoolean(DataClassYAMLMixin):
 
 
 @dataclass
-class BuildResult(DataClassYAMLMixin):
+class BuildResult(BaseXaasConfigModel):
     directory: str
     docker_image: str
     features_boolean: dict[FeatureType, bool]
@@ -311,13 +315,13 @@ class BuildResult(DataClassYAMLMixin):
 
 
 @dataclass
-class LayerDepConfig(DataClassYAMLMixin):
+class LayerDepConfig(BaseXaasConfigModel):
     version: str
     arg_mapping: dict[str, str]
 
 
 @dataclass
-class PartialRunConfig(DataClassYAMLMixin):
+class PartialRunConfig(BaseXaasConfigModel):
     """
     Defines a set of features and other build system arguments for a RunConfig.
     """
@@ -388,7 +392,7 @@ class RunConfig(DataClassYAMLMixin):
 
 
 @dataclass
-class DeployConfig(DataClassYAMLMixin):
+class DeployConfig(BaseXaasConfigModel):
     ir_image: str
     working_directory: str
     cpu_architecture: CPUArchitecture
@@ -418,7 +422,7 @@ class DeployConfig(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceContainerConfig(DataClassYAMLMixin):
+class SourceContainerConfig(BaseXaasConfigModel):
     working_directory: str
     source_directory: str
     project_name: str
@@ -444,14 +448,14 @@ class SourceContainerConfig(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceDeploymentConfigBaseImage(DataClassYAMLMixin):
+class SourceDeploymentConfigBaseImage(BaseXaasConfigModel):
     name: str
     provided_features: list[FeatureType]
     additional_commands: list[str]
 
 
 @dataclass
-class SourceDeploymentConfigSystem(DataClassYAMLMixin):
+class SourceDeploymentConfigSystem(BaseXaasConfigModel):
     name: str
     cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
     system_discovery: str | None = None
@@ -459,7 +463,7 @@ class SourceDeploymentConfigSystem(DataClassYAMLMixin):
 
 
 @dataclass
-class ConfigSelection(DataClassYAMLMixin):
+class ConfigSelection(BaseXaasConfigModel):
     vectorization_flags: str | None
     gpu_backends: str | None
     parallel_libraries: list[str]
@@ -469,7 +473,7 @@ class ConfigSelection(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceDeploymentConfigMode(DataClassYAMLMixin):
+class SourceDeploymentConfigMode(BaseXaasConfigModel):
     mode: SourceContainerMode
     # FIXME: remove that - replace with mode
     # predefined_config_string: str | None
@@ -478,7 +482,7 @@ class SourceDeploymentConfigMode(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceDeploymentConfig(DataClassYAMLMixin):
+class SourceDeploymentConfig(BaseXaasConfigModel):
     source_container: str
     working_directory: str
     project_name: str
