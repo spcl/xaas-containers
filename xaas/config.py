@@ -249,34 +249,16 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
         return result
 
     @staticmethod
-    def reduce_to_cmake(entries: dict[str, ArgumentsVariableEntry]) -> list[str]:
+    def reduce_to_cmake_args(entries: dict[str, ArgumentsVariableEntry]) -> list[str]:
         """
-        Reduces a group of argument variables down to a list of CMake code lines.
+        Reduces a group of argument variables down to a list of unquoted shell arguments which may be passed to a CMake command.
+
+        Note that this doesn't support appending onto any initial default values.
 
         :param entries: the argument variable entries
         """
 
-        result: list[str] = []
-        for name, entry in entries.items():
-            if entry.type is ArgumentsVariableEntryType.SET:
-                result.extend([
-                    f"if (NOT DEFINED {name})",
-                    f"    set({name} \"{entry.value}\")",
-                    f"else()",
-                    f"    message(FATAL_ERROR, \"CMake variable {name} was already set to '${{{name}}}'\")",
-                    f"endif()",
-                ])
-            elif entry.type is ArgumentsVariableEntryType.APPEND:
-                result.extend([
-                    f"if (NOT DEFINED {name})",
-                    f"    set({name} \"{entry.value}\")",
-                    f"else()",
-                    f"    set({name} \"${{{name}}}{entry.separator}{entry.value}\")",
-                    f"endif()",
-                ])
-            else:
-                raise RuntimeError(f"Unknown type: {entry.type}")
-        return result
+        return [ f"-D{name}={entry.value}" for name, entry in entries.items() ]
 
 
 @dataclass

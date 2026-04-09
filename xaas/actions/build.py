@@ -223,17 +223,13 @@ class BuildGenerator(Action):
                 target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
 
                 toolchain_file_name = "toolchain.cmake"
-                toolchain_file = os.path.join(new_dir, toolchain_file_name)
                 toolchain_lines = [
                     "set(CMAKE_C_COMPILER clang)",
                     "set(CMAKE_CXX_COMPILER clang++)",
                     f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
                     f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
-
-                    # properties from the build arguments should be defined as CMake variables
-                    *ArgumentsVariableEntry.reduce_to_cmake(arguments.property),
                 ]
-                with open(toolchain_file, "w") as toolchain_output:
+                with open(os.path.join(new_dir, toolchain_file_name), "w") as toolchain_output:
                     toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
@@ -245,6 +241,9 @@ class BuildGenerator(Action):
                     f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+
+                    # properties from the build arguments should be defined as CMake variables
+                    *ArgumentsVariableEntry.reduce_to_cmake_args(arguments.property),
 
                     # additional CMake arguments
                     *arguments.arguments,
