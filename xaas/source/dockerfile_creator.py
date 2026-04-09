@@ -422,16 +422,13 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
             layer = XaaSConfig().layers.layers[self.architecture][layer_type]
 
             # TODO: jrabil: make layers store a tag instead of a name
-            layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
+            layer_tag = layer.image_tag.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(
                 f"${{{layer.version_arg}}}", version
             )
 
-            self.init_dockerfile_content.append(
-                f"FROM docker.io/{XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
-            )
             self.dockerfile_content.append(
-                f"COPY --from={layer_name}-layer {layer_build_location} {layer_build_location}"
+                f"COPY --from={layer_tag} {layer_build_location} {layer_build_location}"
             )
             for name, env in layer.envs.items():
                 env = env.replace(f"${{{layer.version_arg}}}", version)

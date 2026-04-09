@@ -74,7 +74,7 @@ class DockerLayerVersion(BaseXaasConfigModel):
 @dataclass
 class DockerLayer(BaseXaasConfigModel):
     dockerfile: str
-    name: str
+    image_tag: str
     versions: list[str]
     version_arg: str
     build_location: str

@@ -29,21 +29,16 @@ class Runner:
         tag: str,
         build_args: dict[str, str] | None = None,
         platform: str | None = None,
-    ):
-        buildargs = build_args or {}
+    ) -> Image:
         try:
-            if platform is not None:
-                self.client.images.build(
-                    dockerfile=dockerfile,
-                    path=path,
-                    tag=tag,
-                    buildargs=buildargs,
-                    platform=f"linux/{platform}",
-                )
-            else:
-                self.client.images.build(
-                    dockerfile=dockerfile, path=path, tag=tag, buildargs=buildargs
-                )
+            image, _ = self.client.images.build(
+                dockerfile=dockerfile,
+                path=path,
+                tag=tag,
+                buildargs=build_args or {},
+                platform=(f"linux/{platform}" if platform is not None else None),
+            )
+            return image
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise

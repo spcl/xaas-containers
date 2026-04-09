@@ -3,13 +3,13 @@ layers:
     MPI:
       dockerfile: Dockerfile.mpich
       versions: [4.3.0]
-      name: mpich
+      image_tag: docker.io/spcleth/xaas:mpich
       version_arg: MPICH_VERSION
       build_location: /opt/mpich
       runtime_location: /opt/mpich
     CUDA:
       dockerfile: Dockerfile.cuda
-      name: cuda-${CUDA_VERSION}
+      image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}
       versions: [12.1, 12.8, 12.9]
       version_arg: CUDA_VERSION
       build_location: /usr/local/cuda-${CUDA_VERSION}
@@ -19,7 +19,7 @@ layers:
         LD_LIBRARY_PATH: /usr/local/cuda-${CUDA_VERSION}/lib64
     ONEAPI:
       dockerfile: Dockerfile.oneapi
-      name: oneapi-${ONEAPI_VERSION}
+      image_tag: docker.io/spcleth/xaas:oneapi-${ONEAPI_VERSION}
       versions: [2021.3.0, 2025.0]
       version_arg: ONEAPI_VERSION
       build_location: /opt/intel
@@ -33,7 +33,7 @@ layers:
   arm64:
     CUDA:
       dockerfile: Dockerfile.cuda-arm
-      name: cuda-${CUDA_VERSION}-arm
+      image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}-arm
       versions: [12.6]
       version_arg: CUDA_VERSION
       build_location: /usr/local/cuda-${CUDA_VERSION}
@@ -45,7 +45,7 @@ layers_deps:
   x86_64:
     fftw3:
       dockerfile: deps/Dockerfile.fftw
-      name: deps-fftw3-${version}-${SIMD_FLAG}
+      image_tag: docker.io/spcleth/xaas:deps-fftw3-${version}-${SIMD_FLAG}
       versions: [3.3.10]
       version_arg: FFTW3_VERSION
       arg_mapping:

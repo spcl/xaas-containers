@@ -288,20 +288,19 @@ def build_layers(dep_name: str, version: str | None) -> None:
                 # if the argument is the version, then we don't need to iterate across all values
                 # since we will iterate over the version.
                 if flag_config.flag_name == dep_config.version_arg:
-                    # TODO: jrabil: make layers store a tag instead of a name
-                    name = dep_config.name.replace(f"${{{flag_config.flag_name}}}", version)
+                    layer_tag = dep_config.image_tag.replace(f"${{{flag_config.flag_name}}}", version)
 
                     build_args = {flag_config.flag_name: flag_config.build_args[version]}
 
                     dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
                     logging.info(
-                        f"Building layer {name} with Dockerfile {dockerfile}, arguments {build_args}"
+                        f"Building layer {layer_tag} with Dockerfile {dockerfile}, arguments {build_args}"
                     )
                     print(
                         docker_runner.build(
                             dockerfile=dockerfile,
                             path=os.path.curdir,
-                            tag=f"{XaaSConfig().docker_repository}:{name}",
+                            tag=layer_tag,
                             build_args=build_args,
                         )
                     )
@@ -309,20 +308,20 @@ def build_layers(dep_name: str, version: str | None) -> None:
                 # non-version argument, iterate over all values
                 else:
                     for flag_value, build_arg in flag_config.build_args.items():
-                        name = dep_config.name.replace("${version}", version)
-                        name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+                        layer_tag = dep_config.image_tag.replace("${version}", version)
+                        layer_tag = layer_tag.replace(f"${{{flag_config.flag_name}}}", flag_value)
 
                         build_args = {flag_config.flag_name: build_arg}
 
                         dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
                         logging.info(
-                            f"Building layer {name} with Dockerfile {dockerfile}, arguments {build_args}"
+                            f"Building layer {layer_tag} with Dockerfile {dockerfile}, arguments {build_args}"
                         )
                         print(
                             docker_runner.build(
                                 dockerfile=dockerfile,
                                 path=os.path.curdir,
-                                tag=f"{XaaSConfig().docker_repository}:{name}",
+                                tag=layer_tag,
                                 build_args=build_args,
                             )
                         )
@@ -333,16 +332,16 @@ def build_layers(dep_name: str, version: str | None) -> None:
             versions = [version]
 
         for version in versions:
-            name = dep_config.name.replace("${version}", version)
+            layer_tag = dep_config.image_tag.replace("${version}", version)
 
             build_args = {dep_config.version_arg: version}
 
             dockerfile = os.path.join(DOCKERFILES_DIR, dep_config.dockerfile)
-            logging.info(f"Building layer {name} with Dockerfile {dockerfile}")
+            logging.info(f"Building layer {layer_tag} with Dockerfile {dockerfile}")
             docker_runner.build(
                 dockerfile=dockerfile,
                 path=os.path.curdir,
-                tag=f"{XaaSConfig().docker_repository}:{name}",
+                tag=layer_tag,
                 build_args=build_args,
             )
 
@@ -371,9 +370,8 @@ def build_deps(dep_name: str, version: str | None) -> None:
 
                 # FIXME: proper build arg for version
                 for version in versions:
-                    # TODO: jrabil: make layers store a tag instead of a name
-                    name = dep_config.name.replace("${version}", version)
-                    name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
+                    layer_tag = dep_config.image_tag.replace("${version}", version)
+                    layer_tag = layer_tag.replace(f"${{{flag_config.flag_name}}}", flag_value)
 
                     build_args = {flag_config.flag_name: build_arg}
 
@@ -382,7 +380,7 @@ def build_deps(dep_name: str, version: str | None) -> None:
                         docker_runner.build(
                             dockerfile=dockerfile,
                             path=os.path.curdir,
-                            tag=f"{XaaSConfig().docker_repository}:{name}",
+                            tag=layer_tag,
                             build_args=build_args,
                         )
                     )

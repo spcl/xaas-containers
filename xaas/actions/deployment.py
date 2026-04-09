@@ -61,8 +61,7 @@ class Deployment(Action):
                 )
 
         for layer, version in layers_to_add:
-            # TODO: jrabil: make layers store a tag instead of a name
-            layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
+            layer_tag = layer.image_tag.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(
                 f"${{{layer.version_arg}}}", version
             )
@@ -70,14 +69,11 @@ class Deployment(Action):
                 f"${{{layer.version_arg}}}", version
             )
 
-            lines.append(
-                f"FROM {XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
-            )
             copies.append(
-                f"COPY --link --from={layer_name}-layer {layer_build_location} {layer_build_location}"
+                f"COPY --link --from={layer_tag} {layer_build_location} {layer_build_location}"
             )
             runtime_copies.append(
-                f"COPY --link --from={layer_name}-layer {layer_runtime_location} {layer_runtime_location}"
+                f"COPY --link --from={layer_tag} {layer_runtime_location} {layer_runtime_location}"
             )
 
         for x, val in config.features_select.items():
@@ -91,7 +87,7 @@ class Deployment(Action):
                 "${version}", dependency.version
             )
 
-            name = dep_cfg.name.replace("${version}", dependency.version)
+            layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
                     continue
@@ -100,14 +96,13 @@ class Deployment(Action):
                     flag_name = dep_cfg.arg_mapping[arg].flag_name
                     flag_value = build_option[arg]
 
-                    name = name.replace(f"${{{flag_name}}}", flag_value)
+                    layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
 
-            lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}-layer")
             copies.append(
-                f"COPY --link --from={name}-layer {layer_build_location} {layer_build_location}"
+                f"COPY --link --from={layer_tag} {layer_build_location} {layer_build_location}"
             )
             runtime_copies.append(
-                f"COPY --link --from={name}-layer {layer_runtime_location} {layer_runtime_location}"
+                f"COPY --link --from={layer_tag} {layer_runtime_location} {layer_runtime_location}"
             )
 
         lines.append(f"FROM {config.ir_image} as builder")

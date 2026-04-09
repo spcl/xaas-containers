@@ -49,17 +49,16 @@ class BuildGenerator(Action):
         layers_deps: dict[str, LayerDepConfig],
         cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
-    ) -> str:
-        lines = []
+    ) -> tuple[str, str]:
+        lines: list[str] = []
+        name_suffix: list[str] = []
 
-        name_suffix = []
+        lines.append(f"FROM {docker_image}")
 
-        dep_names = []
         for dep_name, dependency in layers_deps.items():
             dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
 
-            # TODO: jrabil: make layers store a tag instead of a name
-            name = dep_cfg.name.replace("${version}", dependency.version)
+            layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
                     continue
@@ -68,21 +67,15 @@ class BuildGenerator(Action):
                     flag_name = dep_cfg.arg_mapping[arg].flag_name
                     flag_value = build_option[arg]
 
-                    name = name.replace(f"${{{flag_name}}}", flag_value)
-            dep_names.append((dep_name, name))
-            name_suffix.append(name)
+                    layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
+            # TODO: jrabil: we split the tag here and only use the version in the name suffix, but maybe this will result in aliasing?
+            name_suffix.append(layer_tag.split(":", 1)[1])
 
-            lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}")
-
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image}")
-
-        for dep, dep_name in dep_names:
-            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep]
             lines.append(
-                f"COPY --from={dep_name} {dep_cfg.build_location} {dep_cfg.build_location}"
+                f"COPY --from={layer_tag} {dep_cfg.build_location} {dep_cfg.build_location}"
             )
 
-        return ["\n".join(lines), name_suffix]
+        return "\n".join(lines), "_".join(name_suffix)
 
     def execute(self, run_config: RunConfig) -> bool:
         logging.info(f"[{self.name}] Building project {run_config.project_name}")
@@ -186,15 +179,12 @@ class BuildGenerator(Action):
                         f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
                     )
 
-                    docker_image = f"{run_config.docker_image}-{run_config.project_name}"
-
-                    dockerfile_content, flag_names = self._generate_docker_image(
-                        run_config.docker_image,
+                    dockerfile_content, name_suffix = self._generate_docker_image(
+                        docker_image,
                         run_config.layers_deps,
                         run_config.cpu_architecture,
                         states_select,
                     )
-                    name_suffix = "_".join(flag_names)
 
                     dockerfile_path = os.path.join(working_dir, "images", name_suffix, "Dockerfile")
                     os.makedirs(os.path.join(working_dir, "images", name_suffix), exist_ok=True)
@@ -203,18 +193,15 @@ class BuildGenerator(Action):
                         f.write(dockerfile_content)
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
-                    if len(name_suffix) > 0:
-                        docker_image = f"{docker_image}-{name_suffix}"
-
                     logging.info(
-                        f"[{self.name}] Building Docker image: {docker_image}, in {working_dir}"
+                        f"[{self.name}] Building Docker image based on {docker_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
                     )
 
-                    self.docker_runner.build(
+                    docker_image = self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
                         path=os.path.join(working_dir, "images"),
-                        tag=docker_image,
-                    )
+                        tag=None,
+                    ).id
 
                     logging.info(f"[{self.name}] Successfully built Docker image {docker_image}")
 
