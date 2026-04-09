@@ -181,7 +181,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=build.docker_image,
+                        image=build.builder_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,
@@ -362,8 +362,16 @@ class ClangPreprocesser(Action):
         Thus, enabling OpenMP will change the file even if does not affect anything.
         """
         preprocess_cmd = [compiler, "-E", "-P"]
+
+        # additional flags for target triple
+        if command.target_triple is not None:
+            if command.compiler_type == Compiler.CLANG:
+                preprocess_cmd.append(f"--target={command.target_triple.value}")
+            else:
+                raise RuntimeError(f"Don't know how to handle target triple {command.target_triple} using compiler {command.compiler_type}")
+
         # additional flags for CUDA compiler
-        if compiler.endswith("nvcc"):
+        if command.compiler_type == Compiler.NVCC:
             preprocess_cmd.extend(["-forward-unknown-to-host-compiler"])
 
         preprocess_cmd.extend(command.includes)

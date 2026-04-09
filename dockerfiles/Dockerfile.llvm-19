@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# configure apt-get!
+# prevent packages from blocking installation with interaction requests
+# also, make apt keep downloaded package files locally so that they get kept in the build cache
+RUN apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/* /var/lib/apt/* /var/log/apt/* \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# install eatmydata for Speed:tm:
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    apt-get update && apt-get install -y eatmydata
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install -y \
+    build-essential \
+    wget \
+    git \
+    curl \
+    gnupg \
+    apt-transport-https \
+    ca-certificates \
+    lsb-release \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-dev \
+    unzip \
+    tar
+
+#disabled:
+#    software-properties-common \
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install -y \
+    clang-19 \
+    flang-19 \
+    lld-19 \
+    libomp-19-dev \
+    cmake
+
+ENV FC=/usr/bin/flang-new-19
+
+RUN update-alternatives --remove-all cc && update-alternatives --remove-all c++ \
+    && update-alternatives --install /usr/bin/cc cc /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-19 100 \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100
+
+WORKDIR /tmp
+

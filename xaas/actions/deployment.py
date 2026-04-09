@@ -19,12 +19,7 @@ class Deployment(Action):
         self.parallel_workers = parallel_workers
 
     def execute(self, config: DeployConfig) -> bool:
-        active = [x for x, val in config.features_boolean.items() if val]
-        flags = [val for x, val in config.features_select.items()]
-
-        if len(flags) == 0:
-            flags.append(None)
-        name = BuildGenerator.generate_name(active, flags)
+        name = BuildGenerator.generate_name(config.features_boolean, config.features_select)
 
         dockerfile_path = os.path.join(config.working_directory, name)
         os.makedirs(dockerfile_path, exist_ok=True)
@@ -65,17 +60,8 @@ class Deployment(Action):
                     )
                 )
 
-        for feature in config.features_enabled:
-            if feature in XaaSConfig().layers.layers[config.cpu_architecture]:
-                layers_to_add.append(
-                    (
-                        XaaSConfig().layers.layers[config.cpu_architecture][feature],
-                        config.features_versions[feature],
-                    )
-                )
-
         for layer, version in layers_to_add:
-            layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
+            layer_tag = layer.image_tag.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(
                 f"${{{layer.version_arg}}}", version
             )
@@ -83,14 +69,11 @@ class Deployment(Action):
                 f"${{{layer.version_arg}}}", version
             )
 
-            lines.append(
-                f"FROM {XaaSConfig().docker_repository}:{layer_name} as {layer_name}-layer"
-            )
             copies.append(
-                f"COPY --link --from={layer_name}-layer {layer_build_location} {layer_build_location}"
+                f"COPY --link --from={layer_tag} {layer_build_location} {layer_build_location}"
             )
             runtime_copies.append(
-                f"COPY --link --from={layer_name}-layer {layer_runtime_location} {layer_runtime_location}"
+                f"COPY --link --from={layer_tag} {layer_runtime_location} {layer_runtime_location}"
             )
 
         for x, val in config.features_select.items():
@@ -104,7 +87,7 @@ class Deployment(Action):
                 "${version}", dependency.version
             )
 
-            name = dep_cfg.name.replace("${version}", dependency.version)
+            layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
                     continue
@@ -113,14 +96,13 @@ class Deployment(Action):
                     flag_name = dep_cfg.arg_mapping[arg].flag_name
                     flag_value = build_option[arg]
 
-                    name = name.replace(f"${{{flag_name}}}", flag_value)
+                    layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
 
-            lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}-layer")
             copies.append(
-                f"COPY --link --from={name}-layer {layer_build_location} {layer_build_location}"
+                f"COPY --link --from={layer_tag} {layer_build_location} {layer_build_location}"
             )
             runtime_copies.append(
-                f"COPY --link --from={name}-layer {layer_runtime_location} {layer_runtime_location}"
+                f"COPY --link --from={layer_tag} {layer_runtime_location} {layer_runtime_location}"
             )
 
         lines.append(f"FROM {config.ir_image} as builder")
@@ -136,7 +118,8 @@ class Deployment(Action):
         )
 
         # FIXME: conditional
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{XaaSConfig().runner_image}-dev")
+        # TODO: jrabil: use the runtime image configured in RunConfig
+        lines.append(f"FROM {XaaSConfig().default_runtime_image}")
         lines.append("COPY --link --from=builder /build /build")
         lines.extend(runtime_copies)
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import docker
 from docker.models.containers import Container
+from docker.models.images import Image
 
 
 @dataclass
@@ -14,7 +15,8 @@ class VolumeMount:
 
 
 class Runner:
-    def __init__(self, docker_repository: str):
+    # TODO: jrabil: remove docker_repository argument
+    def __init__(self, docker_repository: str = ""):
         self.client = docker.from_env()
         self.uid = os.getuid()
         self.gid = os.getgid()
@@ -27,34 +29,35 @@ class Runner:
         tag: str,
         build_args: dict[str, str] | None = None,
         platform: str | None = None,
-    ):
-        buildargs = build_args or {}
+    ) -> Image:
         try:
-            if platform is not None:
-                self.client.images.build(
-                    dockerfile=dockerfile,
-                    path=path,
-                    tag=tag,
-                    buildargs=buildargs,
-                    platform=f"linux/{platform}",
-                )
-            else:
-                self.client.images.build(
-                    dockerfile=dockerfile, path=path, tag=tag, buildargs=buildargs
-                )
+            image, _ = self.client.images.build(
+                dockerfile=dockerfile,
+                path=path,
+                tag=tag,
+                buildargs=build_args or {},
+                platform=(f"linux/{platform}" if platform is not None else None),
+            )
+            return image
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
+            raise
+        except docker.errors.BuildError as e:
+            logging.error(f"Docker build error: {str(e)}")
+            for it in e.build_log:
+                logging.error(f"\t{it}")
             raise
 
     def run(
         self,
         image: str,
-        command: str,
+        command: str | list[str],
         working_dir: str,
         mounts: list[VolumeMount] | None = None,
         detach: bool = True,
         remove: bool = True,
         tty: bool = False,
+        environment: dict[str, str] | None = None,
     ) -> Container:
         try:
             volumes = {}
@@ -63,12 +66,17 @@ class Runner:
                     volumes[mount.source] = {"bind": mount.target, "mode": mount.mode}
             logging.debug(f"Starting container from image '{image}'")
 
-            image = f"{self.docker_repository}:{image}"
+            # TODO: jrabil: we should make the base docker image be defined explicitly
+            if self.docker_repository:
+                image = f"{self.docker_repository}:{image}"
 
             envs = {
                 "USER_ID": str(self.uid),
                 "GROUP_ID": str(self.gid),
             }
+
+            if environment is not None:
+                envs |= environment
 
             container = self.client.containers.run(
                 image=image,
@@ -100,3 +108,16 @@ class Runner:
         except docker.errors.APIError as e:
             logging.error(f"Docker API error: {str(e)}")
             raise
+
+    def get_image(self, image: str) -> Image:
+        return self.client.images.get(image)
+
+    def get_image_env(self, image: str | Image) -> dict[str, str]:
+        if isinstance(image, str):
+            image = self.get_image(image)
+
+        result: dict[str, str] = {}
+        for item in image.attrs["Config"]["Env"]:
+            name, value = item.split("=", 1)
+            result[name] = value
+        return result

@@ -1,20 +1,44 @@
 from __future__ import annotations
 
-import copy
 import os
-from dataclasses import asdict
+import shlex
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from pathlib import Path
 
 import yaml
+from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+
+from xaas.util.dict_utils import union_distinct, union_merge
+
+
+class BaseXaasConfigModel(DataClassYAMLMixin):
+    class Config(BaseConfig):
+        forbid_extra_keys = True
 
 
 class CPUArchitecture(str, Enum):
     X86_64 = "x86_64"
     ARM_64 = "arm64"
+
+
+# TODO: Replace CPUArchitecture with this!
+#   (it's separate for now to avoid breaking existing configs)
+class TargetTriple(str, Enum):
+    X86_64_LINUX_GNU = "x86_64-linux-gnu"
+    AARCH64_LINUX_GNU = "aarch64-linux-gnu"
+
+    @staticmethod
+    def from_cpu_architecture(cpu_architecture: CPUArchitecture) -> TargetTriple:
+        match cpu_architecture:
+            case CPUArchitecture.X86_64:
+                return TargetTriple.X86_64_LINUX_GNU
+            case CPUArchitecture.ARM_64:
+                return TargetTriple.AARCH64_LINUX_GNU
+            case _:
+                raise ValueError(f"Unsupported CPU architecture: {cpu_architecture}")
 
 
 class IRType(Enum):
@@ -42,15 +66,15 @@ class Language(str, Enum):
 
 
 @dataclass
-class DockerLayerVersion(DataClassYAMLMixin):
+class DockerLayerVersion(BaseXaasConfigModel):
     flag_name: str
     build_args: dict[str, str]
 
 
 @dataclass
-class DockerLayer(DataClassYAMLMixin):
+class DockerLayer(BaseXaasConfigModel):
     dockerfile: str
-    name: str
+    image_tag: str
     versions: list[str]
     version_arg: str
     build_location: str
@@ -60,7 +84,7 @@ class DockerLayer(DataClassYAMLMixin):
 
 
 @dataclass
-class DockerLayers(DataClassYAMLMixin):
+class DockerLayers(BaseXaasConfigModel):
     layers: dict[CPUArchitecture, dict[FeatureType, DockerLayer]]
     layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]]
 
@@ -92,9 +116,9 @@ class XaaSConfig:
 
     def __init__(self):
         self._initialized: bool
-        self.docker_repository: str
         self.ir_type: IRType
-        self.runner_image: str
+        self.default_builder_image: str
+        self.default_runtime_image: str
         self.parallelism_level: int
         self.layers: DockerLayers
 
@@ -108,9 +132,9 @@ class XaaSConfig:
         with open(config_path) as f:
             config_data = yaml.safe_load(f)
 
-        self.docker_repository = config_data["docker_repository"]
         self.parallelism_level = config_data["parallelism_level"]
-        self.runner_image = config_data["runner_image"]
+        self.default_builder_image = config_data["default_builder_image"]
+        self.default_runtime_image = config_data["default_runtime_image"]
 
         match config_data["ir_type"]:
             case IRType.LLVM_IR.value:
@@ -139,18 +163,174 @@ class FeatureSelectionType(Enum):
     VECTORIZATION = "VECTORIZATION"
 
 
+class ArgumentsVariableEntryType(Enum):
+    APPEND = "append"
+    SET = "set"
+
+
 @dataclass
-class BuildResult(DataClassYAMLMixin):
+class ArgumentsVariableEntry(BaseXaasConfigModel):
+    type: ArgumentsVariableEntryType
+    value: str
+    separator: str = ""
+
+    class Config(BaseXaasConfigModel.Config):
+        # Don't include separator when it's left as the default
+        omit_default = True
+
+    @classmethod
+    def __pre_deserialize__(cls, arg):
+        if isinstance(arg, str):
+            # For convenience, a plain string value can be implicitly converted into a 'SET' entry
+            return { "type": "set", "value": arg }
+        else:
+            return arg
+
+    @staticmethod
+    def merge(a: ArgumentsVariableEntry, b: ArgumentsVariableEntry) -> ArgumentsVariableEntry:
+        # We can combine two set directives if they have the same value
+        if a.type is ArgumentsVariableEntryType.SET and b.type is ArgumentsVariableEntryType.SET:
+            if a.value != b.value:
+                raise RuntimeError(f"Cannot set variable with different values: '{a.value}' and '{b.value}'")
+
+            return ArgumentsVariableEntry(
+                type=ArgumentsVariableEntryType.SET,
+                value=a.value,
+            )
+
+        # We can combine two append directives as long as they both use the same separator
+        if a.type is ArgumentsVariableEntryType.APPEND and b.type is ArgumentsVariableEntryType.APPEND:
+            if a.separator != b.separator:
+                raise RuntimeError(f"Mismatched separators: '{a.separator}' and '{b.separator}'")
+
+            return ArgumentsVariableEntry(
+                type=ArgumentsVariableEntryType.APPEND,
+                value=f"{a.value}{b.separator}{b.value}",
+                separator=a.separator,
+            )
+
+        # Refuse to handle any other combination
+        raise RuntimeError(f"Mismatched variable update types: {a} and {b}")
+
+    def to_shell_export(self, name: str) -> list[str]:
+        """
+        Gets a shell 'export' command which sets or updates this variable's value.
+
+        Returns a single quoted shell command.
+        """
+
+        if self.type is ArgumentsVariableEntryType.APPEND:
+            return [ "export", f'{name}="${{{name}}}${{{name}:+{self.separator}}}"{shlex.quote(self.value)}' ]
+        elif self.type is ArgumentsVariableEntryType.SET:
+            return [ "export", f'{name}={shlex.quote(self.value)}' ]
+        else:
+            raise RuntimeError(f"Unknown type: {self.type}")
+
+    @staticmethod
+    def reduce_to_dict(entries: dict[str, ArgumentsVariableEntry], defaults: dict[str, str]) -> dict[str, str]:
+        """
+        Reduces a group of argument variables down to a single dict containing the effective key-value mappings.
+
+        :param entries: the argument variable entries
+        :param defaults: a dict containing the inherited initial variable values
+        """
+
+        result: dict[str, str] = {}
+        for name, entry in entries.items():
+            if entry.type is ArgumentsVariableEntryType.APPEND:
+                if name in defaults:
+                    result[name] = f"{defaults[name]}{entry.separator}{entry.value}"
+                else:
+                    result[name] = entry.value
+            elif entry.type is ArgumentsVariableEntryType.SET:
+                result[name] = entry.value
+            else:
+                raise RuntimeError(f"Unknown type: {entry.type}")
+        return result
+
+    @staticmethod
+    def reduce_to_cmake_args(entries: dict[str, ArgumentsVariableEntry]) -> list[str]:
+        """
+        Reduces a group of argument variables down to a list of unquoted shell arguments which may be passed to a CMake command.
+
+        Note that this doesn't support appending onto any initial default values.
+
+        :param entries: the argument variable entries
+        """
+
+        return [ f"-D{name}={entry.value}" for name, entry in entries.items() ]
+
+
+@dataclass
+class BuildSystemArguments(BaseXaasConfigModel):
+    environment: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    property: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+
+    arguments: list[str] = field(default_factory=list)
+
+    @staticmethod
+    def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
+        return BuildSystemArguments(
+            environment = union_merge(a.environment, b.environment, ArgumentsVariableEntry.merge),
+            property = union_merge(a.property, b.property, ArgumentsVariableEntry.merge),
+
+            # simply concatenate any additional arguments
+            arguments = a.arguments + b.arguments,
+        )
+
+
+@dataclass
+class FeatureConfigBoolean(BaseXaasConfigModel):
+    enabled: BuildSystemArguments
+    disabled: BuildSystemArguments
+
+    def args_for_state(self, state: bool) -> BuildSystemArguments:
+        return self.enabled if state else self.disabled
+
+
+@dataclass
+class BuildResult(BaseXaasConfigModel):
     directory: str
-    docker_image: str
-    features_boolean: list[FeatureType]
-    features_select: dict[FeatureSelectionType, str] = field(default_factory=dict)
+    builder_image: str
+    runtime_image: str
+    features_boolean: dict[FeatureType, bool]
+    features_select: dict[str, str]
 
 
 @dataclass
-class LayerDepConfig(DataClassYAMLMixin):
+class LayerDepConfig(BaseXaasConfigModel):
     version: str
     arg_mapping: dict[str, str]
+
+
+@dataclass
+class PartialRunConfig(BaseXaasConfigModel):
+    """
+    Defines a set of features and other build system arguments for a RunConfig.
+    """
+
+    features_boolean: dict[FeatureType, FeatureConfigBoolean]
+    features_select: dict[str, dict[str, BuildSystemArguments]]
+    build_args: BuildSystemArguments
+
+    builder_image: str | None = None
+    runtime_image: str | None = None
+
+    @staticmethod
+    def merge(a: PartialRunConfig, b: PartialRunConfig) -> PartialRunConfig:
+        return PartialRunConfig(
+            features_boolean = union_distinct(a.features_boolean, b.features_boolean),
+            features_select = union_distinct(a.features_select, b.features_select),
+            build_args = BuildSystemArguments.merge(a.build_args, b.build_args),
+
+            builder_image = a.builder_image or b.builder_image,
+            runtime_image = a.runtime_image or b.runtime_image,
+        )
+
+    def effective_docker_images(self) -> tuple[str, str]:
+        effective_builder_image = self.builder_image or XaaSConfig().default_builder_image
+        effective_runtime_image = self.runtime_image or XaaSConfig().default_runtime_image
+        return effective_builder_image, effective_runtime_image
 
 
 @dataclass
@@ -160,19 +340,18 @@ class RunConfig(DataClassYAMLMixin):
     build_system: BuildSystem
     source_directory: str
     cpu_architecture: CPUArchitecture
-    features_boolean: dict[FeatureType, tuple[str, str]]
-    features_select: dict[str, dict[str, str]]
-    additional_args: list[str]
-    additional_steps: list[str]
+    all_targets: PartialRunConfig
+    cpu_specific: dict[CPUArchitecture, PartialRunConfig]
+    additional_steps: list[list[str]]
     layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
-    @staticmethod
-    def load(config_path: str) -> RunConfig:
+    @classmethod
+    def load(cls, config_path: str) -> RunConfig:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
 
         with open(config_path) as f:
-            return RunConfig.from_yaml(f)
+            return cls.from_yaml(f)
 
     def save(self, config_path: str) -> None:
         with open(config_path, "w") as f:
@@ -180,17 +359,37 @@ class RunConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
-        obj.layers_deps = copy.deepcopy(instance.layers_deps)
-        return obj
+        return cls.from_dict(instance.to_dict())
+
+    def for_target(self, cpu_architecture: CPUArchitecture) -> PartialRunConfig:
+        """
+        Gets the PartialRunConfig for a specific CPU architecture.
+        """
+        if cpu_architecture in self.cpu_specific:
+            return PartialRunConfig.merge(self.all_targets, self.cpu_specific[cpu_architecture])
+        else:
+            return self.all_targets
+
+    def may_contain_feature_boolean(self, feature: FeatureType) -> bool:
+        """
+        Checks if any permutations of this configuration may contain the given boolean feature.
+        """
+
+        if self.all_targets.features_boolean.get(feature, False):
+            return True
+
+        for cfg in self.cpu_specific.values():
+            if cfg.features_boolean.get(feature, False):
+                return True
+
+        return False
 
 
 @dataclass
-class DeployConfig(DataClassYAMLMixin):
+class DeployConfig(BaseXaasConfigModel):
     ir_image: str
     working_directory: str
     cpu_architecture: CPUArchitecture
-    features_enabled: list[FeatureType]
     features_boolean: dict[FeatureType, bool]
     features_versions: dict[FeatureType, str]
     features_select: dict[str, str]
@@ -213,11 +412,11 @@ class DeployConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        return cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
 
 
 @dataclass
-class SourceContainerConfig(DataClassYAMLMixin):
+class SourceContainerConfig(BaseXaasConfigModel):
     working_directory: str
     source_directory: str
     project_name: str
@@ -238,19 +437,19 @@ class SourceContainerConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
         return obj
 
 
 @dataclass
-class SourceDeploymentConfigBaseImage(DataClassYAMLMixin):
+class SourceDeploymentConfigBaseImage(BaseXaasConfigModel):
     name: str
     provided_features: list[FeatureType]
     additional_commands: list[str]
 
 
 @dataclass
-class SourceDeploymentConfigSystem(DataClassYAMLMixin):
+class SourceDeploymentConfigSystem(BaseXaasConfigModel):
     name: str
     cpu_architecture: CPUArchitecture = CPUArchitecture.X86_64
     system_discovery: str | None = None
@@ -258,7 +457,7 @@ class SourceDeploymentConfigSystem(DataClassYAMLMixin):
 
 
 @dataclass
-class ConfigSelection(DataClassYAMLMixin):
+class ConfigSelection(BaseXaasConfigModel):
     vectorization_flags: str | None
     gpu_backends: str | None
     parallel_libraries: list[str]
@@ -268,7 +467,7 @@ class ConfigSelection(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceDeploymentConfigMode(DataClassYAMLMixin):
+class SourceDeploymentConfigMode(BaseXaasConfigModel):
     mode: SourceContainerMode
     # FIXME: remove that - replace with mode
     # predefined_config_string: str | None
@@ -277,7 +476,7 @@ class SourceDeploymentConfigMode(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceDeploymentConfig(DataClassYAMLMixin):
+class SourceDeploymentConfig(BaseXaasConfigModel):
     source_container: str
     working_directory: str
     project_name: str
@@ -300,5 +499,5 @@ class SourceDeploymentConfig(DataClassYAMLMixin):
 
     @classmethod
     def from_instance(cls, instance):
-        obj = cls(**asdict(instance))
+        return cls.from_dict(instance.to_dict())
         return obj

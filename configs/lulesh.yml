@@ -2,9 +2,30 @@ working_directory: lulesh-builds
 source_directory: LULESH
 project_name: LULESH
 build_system: cmake
-features_select: {}
-features_boolean:
-  MPI: [WITH_MPI=ON, WITH_MPI=OFF]
-  OPENMP: [WITH_OPENMP=ON, WITH_OPENMP=OFF]
-additional_args: []
+cpu_architecture: x86_64
+all_targets:
+  features_boolean:
+    MPI:
+      enabled:
+        property:
+          WITH_MPI:
+            type: set
+            value: 'ON'
+      disabled:
+        property:
+          WITH_MPI: 'OFF'
+    OPENMP:
+      enabled:
+        property:
+          WITH_OPENMP: 'ON'
+      disabled:
+        property:
+          WITH_OPENMP: 'OFF'
+  features_select: {}
+  build_args: {}
+cpu_specific:
+  x86_64:
+    features_boolean: {}
+    features_select: {}
+    build_args: {}
 additional_steps: []

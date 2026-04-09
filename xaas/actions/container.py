@@ -20,12 +20,10 @@ class DockerImageBuilder(Action):
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
         )
-        self.BASE_IMAGE = "spcleth/xaas:llvm-19"
-        self.BASE_IMAGE_DEV = "spcleth/xaas:llvm-19-dev"
+        self.BASE_IMAGE = "spcleth/xaas:builder-19-cross"
 
-        self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
-
-        self.CLANG_PATH = "/usr/bin/c++"
+        self.OPT_PATH_DEV = "opt-19"
+        self.CLANG_PATH = "clang++-19"
 
         self.docker_repository = docker_repository
 
@@ -37,18 +35,16 @@ class DockerImageBuilder(Action):
 
         build_dir = os.path.join(config.build.working_directory, os.path.pardir)
 
-        uses_dev = False
         for build in config.build.build_results:
             file_path = os.path.join(build.directory, "build.sh")
             with open(file_path, "w") as f:
-                lines, dev_flag = self._generate_bashscript(build.directory, config)
+                lines = self._generate_bashscript(build.directory, config)
                 f.write(lines)
-                uses_dev |= dev_flag
 
             logging.info(f"[{self.name}] Created build script in {file_path}")
 
         dockerfile_path = os.path.join(build_dir, "Dockerfile")
-        dockerfile_content = self._generate_dockerfile(build_dir, config, uses_dev)
+        dockerfile_content = self._generate_dockerfile(build_dir, config)
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
@@ -67,10 +63,8 @@ class DockerImageBuilder(Action):
 
     def _generate_bashscript(
         self, project_dir: str, config: PreprocessingResult
-    ) -> tuple[str, bool]:
+    ) -> str:
         lines = ["#!/bin/bash", ""]
-
-        uses_dev = False
 
         project_file = os.path.join(project_dir, "compile_commands.json")
         try:
@@ -121,14 +115,13 @@ class DockerImageBuilder(Action):
 
             if len(result.projects[project_dir].cpu_tuning) > 0:
                 opt_cmd = self._cpu_tune(ir_file, result.projects[project_dir], config.build)
-                uses_dev = True
 
                 lines.append(f"{opt_cmd} && {ir_cmd}")
             else:
                 lines.append(ir_cmd)
             lines.append("")
 
-        return ("\n".join(lines), uses_dev)
+        return "\n".join(lines)
 
     def _cpu_tune(
         self,
@@ -146,7 +139,7 @@ class DockerImageBuilder(Action):
         # (1) We run the custom opt pass to replace targets
         # (2) We run optimizations (together with the previous one)
         # FIXME: hardcoding
-        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/build/libReplaceTargetFeatures.so "
+        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/feature-analyzer/libReplaceTargetFeatures.so "
         cmd += '-passes="replace-target-features" '
 
         if project.cpu_tuning:
@@ -170,32 +163,14 @@ class DockerImageBuilder(Action):
         return cmd
 
     def _generate_dockerfile(
-        self, build_dir: str, config: PreprocessingResult, uses_dev_image: bool
+        self, build_dir: str, config: PreprocessingResult
     ) -> str:
         lines = []
-
-        # FIXME: full dev image!
-        if uses_dev_image:
-            lines.append(f"FROM {self.BASE_IMAGE_DEV} AS llvm-dev")
-            lines.append("FROM spcleth/xaas:features-analyzer-dev as features-analyzer")
 
         lines.extend(
             [
                 f"FROM {self.BASE_IMAGE}",
                 "",
-            ]
-        )
-
-        # FIXME: full dev image!
-        if uses_dev_image:
-            lines.append("COPY --from=llvm-dev /opt/llvm /opt/llvm")
-            lines.append("COPY --from=features-analyzer /tools /tools")
-
-        lines.extend(
-            [
-                "# Add build directories for IR analysis",
-                "WORKDIR /builds/",
-                "RUN apt-get update && apt-get install -y --no-install-recommends parallel && rm -rf /var/lib/apt/lists/*",
             ]
         )
 
