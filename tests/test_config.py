@@ -26,7 +26,8 @@ def test_load_config(resources: tuple[XaaSConfig, dict]) -> None:
     config.initialize(XaaSConfig.DEFAULT_CONFIGURATION)
 
     # check also singleton property
-    assert resources[0].docker_repository == resources[1]["docker_repository"]
+    assert resources[0].default_builder_image == resources[1]["default_builder_image"]
+    assert resources[0].default_runtime_image == resources[1]["default_runtime_image"]
     assert resources[0].ir_type.value == resources[1]["ir_type"]
     assert resources[0].parallelism_level == resources[1]["parallelism_level"]
 

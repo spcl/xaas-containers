@@ -15,7 +15,8 @@ class VolumeMount:
 
 
 class Runner:
-    def __init__(self, docker_repository: str):
+    # TODO: jrabil: remove docker_repository argument
+    def __init__(self, docker_repository: str = ""):
         self.client = docker.from_env()
         self.uid = os.getuid()
         self.gid = os.getgid()
@@ -71,7 +72,8 @@ class Runner:
             logging.debug(f"Starting container from image '{image}'")
 
             # TODO: jrabil: we should make the base docker image be defined explicitly
-            image = f"{self.docker_repository}:{image}"
+            if self.docker_repository:
+                image = f"{self.docker_repository}:{image}"
 
             envs = {
                 "USER_ID": str(self.uid),

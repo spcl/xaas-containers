@@ -421,6 +421,7 @@ rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         for layer_type, version in features_requested:
             layer = XaaSConfig().layers.layers[self.architecture][layer_type]
 
+            # TODO: jrabil: make layers store a tag instead of a name
             layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(
                 f"${{{layer.version_arg}}}", version

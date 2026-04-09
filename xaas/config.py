@@ -116,9 +116,9 @@ class XaaSConfig:
 
     def __init__(self):
         self._initialized: bool
-        self.docker_repository: str
         self.ir_type: IRType
-        self.runner_image: str
+        self.default_builder_image: str
+        self.default_runtime_image: str
         self.parallelism_level: int
         self.layers: DockerLayers
 
@@ -132,9 +132,9 @@ class XaaSConfig:
         with open(config_path) as f:
             config_data = yaml.safe_load(f)
 
-        self.docker_repository = config_data["docker_repository"]
         self.parallelism_level = config_data["parallelism_level"]
-        self.runner_image = config_data["runner_image"]
+        self.default_builder_image = config_data["default_builder_image"]
+        self.default_runtime_image = config_data["default_runtime_image"]
 
         match config_data["ir_type"]:
             case IRType.LLVM_IR.value:

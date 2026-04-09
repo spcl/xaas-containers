@@ -61,6 +61,7 @@ class Deployment(Action):
                 )
 
         for layer, version in layers_to_add:
+            # TODO: jrabil: make layers store a tag instead of a name
             layer_name = layer.name.replace(f"${{{layer.version_arg}}}", version)
             layer_build_location = layer.build_location.replace(
                 f"${{{layer.version_arg}}}", version
@@ -122,7 +123,8 @@ class Deployment(Action):
         )
 
         # FIXME: conditional
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{XaaSConfig().runner_image}-dev")
+        # TODO: jrabil: use the runtime image configured in RunConfig
+        lines.append(f"FROM {XaaSConfig().default_runtime_image}")
         lines.append("COPY --link --from=builder /build /build")
         lines.extend(runtime_copies)
 

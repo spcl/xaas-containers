@@ -35,7 +35,7 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
     # TODO: jrabil: this should probably be moved to RunConfig
-    docker_image: str = "builder-19-cross"
+    docker_image: str = "docker.io/spcleth/xaas:builder-19-cross"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
 
@@ -58,6 +58,7 @@ class BuildGenerator(Action):
         for dep_name, dependency in layers_deps.items():
             dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
 
+            # TODO: jrabil: make layers store a tag instead of a name
             name = dep_cfg.name.replace("${version}", dependency.version)
             for arg, value in dependency.arg_mapping.items():
                 if not dep_cfg.arg_mapping:
@@ -178,7 +179,7 @@ class BuildGenerator(Action):
             for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
                 build_dir = self.generate_name(states_boolean, states_select)
 
-                docker_image = f"{run_config.docker_image}"
+                docker_image = run_config.docker_image
 
                 if len(run_config.layers_deps) > 0:
                     logging.info(
@@ -212,7 +213,7 @@ class BuildGenerator(Action):
                     self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
                         path=os.path.join(working_dir, "images"),
-                        tag=f"{XaaSConfig().docker_repository}:{docker_image}",
+                        tag=docker_image,
                     )
 
                     logging.info(f"[{self.name}] Successfully built Docker image {docker_image}")
@@ -231,7 +232,7 @@ class BuildGenerator(Action):
 
                 # environment variables from the build arguments should be defined when running CMake
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
-                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(f"{XaaSConfig().docker_repository}:{docker_image}"))
+                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(docker_image))
 
                 target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
 

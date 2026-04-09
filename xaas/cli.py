@@ -235,7 +235,7 @@ def ir_compiler_run_summary(config) -> None:
 
 @ir.command()
 @click.argument("config", type=click.Path(exists=True))
-@click.option("--docker-repository", type=str, default="spcleth:xaas", help="Docker repository")
+@click.option("--docker-repository", type=str, default="docker.io/spcleth/xaas", help="Docker repository")
 def container(config, docker_repository) -> None:
     initialize()
 
@@ -276,7 +276,7 @@ def build_layers(dep_name: str, version: str | None) -> None:
 
     dep_config = XaaSConfig().layers.layers[dependency]
 
-    docker_runner = DockerRunner(XaaSConfig().docker_repository)
+    docker_runner = DockerRunner()
 
     if dep_config.arg_mapping:
         versions = dep_config.versions
@@ -288,6 +288,7 @@ def build_layers(dep_name: str, version: str | None) -> None:
                 # if the argument is the version, then we don't need to iterate across all values
                 # since we will iterate over the version.
                 if flag_config.flag_name == dep_config.version_arg:
+                    # TODO: jrabil: make layers store a tag instead of a name
                     name = dep_config.name.replace(f"${{{flag_config.flag_name}}}", version)
 
                     build_args = {flag_config.flag_name: flag_config.build_args[version]}
@@ -359,7 +360,7 @@ def build_deps(dep_name: str, version: str | None) -> None:
 
     dep_config = XaaSConfig().layers.layers_deps[dep_name]
 
-    docker_runner = DockerRunner(XaaSConfig().docker_repository)
+    docker_runner = DockerRunner()
 
     if dep_config.arg_mapping:
         for _, flag_config in dep_config.arg_mapping.items():
@@ -370,6 +371,7 @@ def build_deps(dep_name: str, version: str | None) -> None:
 
                 # FIXME: proper build arg for version
                 for version in versions:
+                    # TODO: jrabil: make layers store a tag instead of a name
                     name = dep_config.name.replace("${version}", version)
                     name = name.replace(f"${{{flag_config.flag_name}}}", flag_value)
 

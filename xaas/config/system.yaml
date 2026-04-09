@@ -1,4 +1,4 @@
-docker_repository: "spcleth/xaas"
-runner_image: "runner-19"
+default_builder_image: "docker.io/spcleth/xaas:builder-19-cross"
+default_runtime_image: "docker.io/spcleth/xaas:runner-19-dev"
 ir_type: "llvm-ir"
 parallelism_level: 4
