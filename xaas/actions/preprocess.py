@@ -181,7 +181,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=build.docker_image,
+                        image=build.builder_image,
                         mounts=volumes,
                         remove=True,
                         detach=True,

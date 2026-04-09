@@ -309,7 +309,8 @@ class FeatureConfigBoolean(BaseXaasConfigModel):
 @dataclass
 class BuildResult(BaseXaasConfigModel):
     directory: str
-    docker_image: str
+    builder_image: str
+    runtime_image: str
     features_boolean: dict[FeatureType, bool]
     features_select: dict[str, str]
 
@@ -330,13 +331,24 @@ class PartialRunConfig(BaseXaasConfigModel):
     features_select: dict[str, dict[str, BuildSystemArguments]]
     build_args: BuildSystemArguments
 
+    builder_image: str | None = None
+    runtime_image: str | None = None
+
     @staticmethod
     def merge(a: PartialRunConfig, b: PartialRunConfig) -> PartialRunConfig:
         return PartialRunConfig(
             features_boolean = union_distinct(a.features_boolean, b.features_boolean),
             features_select = union_distinct(a.features_select, b.features_select),
             build_args = BuildSystemArguments.merge(a.build_args, b.build_args),
+
+            builder_image = a.builder_image or b.builder_image,
+            runtime_image = a.runtime_image or b.runtime_image,
         )
+
+    def effective_docker_images(self) -> tuple[str, str]:
+        effective_builder_image = self.builder_image or XaaSConfig().default_builder_image
+        effective_runtime_image = self.runtime_image or XaaSConfig().default_runtime_image
+        return effective_builder_image, effective_runtime_image
 
 
 @dataclass

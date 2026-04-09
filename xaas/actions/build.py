@@ -34,8 +34,6 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
-    # TODO: jrabil: this should probably be moved to RunConfig
-    docker_image: str = "docker.io/spcleth/xaas:builder-19-cross"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
 
 
@@ -168,11 +166,12 @@ class BuildGenerator(Action):
         if True:
             # TODO: jrabil: automatically build for multiple configurations
             effective_run_config = run_config.for_target(run_config.cpu_architecture)
+            effective_builder_image, effective_runtime_image = effective_run_config.effective_docker_images()
 
             for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
                 build_dir = self.generate_name(states_boolean, states_select)
 
-                docker_image = run_config.docker_image
+                builder_image = effective_builder_image
 
                 if len(run_config.layers_deps) > 0:
                     logging.info(
@@ -180,7 +179,7 @@ class BuildGenerator(Action):
                     )
 
                     dockerfile_content, name_suffix = self._generate_docker_image(
-                        docker_image,
+                        builder_image,
                         run_config.layers_deps,
                         run_config.cpu_architecture,
                         states_select,
@@ -194,16 +193,16 @@ class BuildGenerator(Action):
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
                     logging.info(
-                        f"[{self.name}] Building Docker image based on {docker_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
+                        f"[{self.name}] Building Docker image based on {builder_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
                     )
 
-                    docker_image = self.docker_runner.build(
+                    builder_image = self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
                         path=os.path.join(working_dir, "images"),
                         tag=None,
                     ).id
 
-                    logging.info(f"[{self.name}] Successfully built Docker image {docker_image}")
+                    logging.info(f"[{self.name}] Successfully built Docker image {builder_image}")
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
@@ -219,7 +218,7 @@ class BuildGenerator(Action):
 
                 # environment variables from the build arguments should be defined when running CMake
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
-                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(docker_image))
+                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(builder_image))
 
                 target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
 
@@ -238,7 +237,7 @@ class BuildGenerator(Action):
                     toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
-                    f"Executing build in {new_dir}, image {docker_image}, combination: {states_boolean | states_select}"
+                    f"Executing build in {new_dir}, image {builder_image}, combination: {states_boolean | states_select}"
                 )
 
                 cmake_command: list[str] = [
@@ -273,7 +272,9 @@ class BuildGenerator(Action):
                 volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
 
                 res = BuildResult(
-                    docker_image=docker_image, directory=new_dir,
+                    directory=new_dir,
+                    builder_image=builder_image,
+                    runtime_image=effective_runtime_image,
                     features_boolean=states_boolean,
                     features_select=states_select
                 )
@@ -281,7 +282,7 @@ class BuildGenerator(Action):
                 containers.append(
                     (
                         self.docker_runner.run(
-                            image=docker_image,
+                            image=builder_image,
                             command=[ "bash", "-c", configure_cmd ],
                             environment=cmake_environment,
                             mounts=volumes,
