@@ -1,53 +1,45 @@
 layers:
   x86_64:
-    MPI:
-      dockerfile: Dockerfile.mpich
-      versions: [4.3.0]
-      image_tag: docker.io/spcleth/xaas:mpich
+    mpich:
+      versions: ['4.3.0']
       version_arg: MPICH_VERSION
-      build_location: /opt/mpich
-      runtime_location: /opt/mpich
-    CUDA:
-      dockerfile: Dockerfile.cuda
-      image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}
-      versions: [12.1, 12.8, 12.9]
+      builder_paths:
+        - image_tag: docker.io/spcleth/xaas:mpich
+          src_path: /opt/mpich
+          dst_path: /opt/mpich
+      runtime_paths:
+        - image_tag: docker.io/spcleth/xaas:mpich
+          src_path: /opt/mpich
+          dst_path: /opt/mpich
+    cuda:
+      versions: ['12.1', '12.8', '12.9']
       version_arg: CUDA_VERSION
-      build_location: /usr/local/cuda-${CUDA_VERSION}
-      runtime_location: /usr/local/cuda-${CUDA_VERSION}
-      envs:
-        PATH: /usr/local/cuda-${CUDA_VERSION}/bin
-        LD_LIBRARY_PATH: /usr/local/cuda-${CUDA_VERSION}/lib64
-    ONEAPI:
-      dockerfile: Dockerfile.oneapi
-      image_tag: docker.io/spcleth/xaas:oneapi-${ONEAPI_VERSION}
-      versions: [2021.3.0, 2025.0]
-      version_arg: ONEAPI_VERSION
-      build_location: /opt/intel
-      runtime_location: /opt/intel
-      arg_mapping:
-        ONEAPI_VERSION:
-          flag_name: ONEAPI_VERSION
-          build_args:
-            2021.3.0: intel-basekit-2021.3.0
-            2025.0: intel-oneapi-base-toolkit-2025.0
-  arm64:
-    CUDA:
-      dockerfile: Dockerfile.cuda-arm
-      image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}-arm
-      versions: [12.6]
-      version_arg: CUDA_VERSION
-      build_location: /usr/local/cuda-${CUDA_VERSION}
-      runtime_location: /usr/local/cuda-${CUDA_VERSION}
-      envs:
-        PATH: /usr/local/cuda-${CUDA_VERSION}/bin
-        LD_LIBRARY_PATH: /usr/local/cuda-${CUDA_VERSION}/lib64
-layers_deps:
-  x86_64:
+      all_paths:
+        - image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}
+          src_path: /usr/local/cuda-${CUDA_VERSION}
+          dst_path: /usr/local/cuda-${CUDA_VERSION}
+      all_env:
+        PATH:
+          type: append
+          value: /usr/local/cuda-${CUDA_VERSION}/bin
+          separator: ':'
+        LD_LIBRARY_PATH:
+          type: append
+          value: /usr/local/cuda-${CUDA_VERSION}/lib64
+          separator: ':'
     fftw3:
-      dockerfile: deps/Dockerfile.fftw
-      image_tag: docker.io/spcleth/xaas:deps-fftw3-${version}-${SIMD_FLAG}
-      versions: [3.3.10]
+      versions: ['3.3.10']
       version_arg: FFTW3_VERSION
+      all_paths:
+        - image_tag: docker.io/spcleth/xaas:deps-fftw3-${version}-${SIMD_FLAG}
+          src_path: /opt/fftw3
+          dst_path: /opt/fftw3
+      all_env:
+        PKG_CONFIG_PATH:
+          type: append
+          value: /opt/fftw3/lib/pkgconfig
+          separator: ':'
+
       arg_mapping:
         VECTORIZATION:
           flag_name: SIMD_FLAG
@@ -58,8 +50,33 @@ layers_deps:
             AVX2_128: --enable-sse2 --enable-avx --enable-avx2
             AVX2_256: --enable-sse2 --enable-avx --enable-avx2
             AVX_512: --enable-sse2 --enable-avx --enable-avx2 --enable-avx512
-
-      build_location: /opt/fftw3
-      runtime_location: /opt/fftw3
-      envs:
-        PKG_CONFIG_PATH: /opt/fftw3/lib/pkgconfig
+    oneapi:
+      versions: ['2021.3.0', '2025.0']
+      version_arg: ONEAPI_VERSION
+      all_paths:
+        - image_tag: docker.io/spcleth/xaas:oneapi-${ONEAPI_VERSION}
+          src_path: /opt/intel
+          dst_path: /opt/intel
+      arg_mapping:
+        ONEAPI_VERSION:
+          flag_name: ONEAPI_VERSION
+          build_args:
+            2021.3.0: intel-basekit-2021.3.0
+            2025.0: intel-oneapi-base-toolkit-2025.0
+  arm64:
+    cuda:
+      versions: ['12.6']
+      version_arg: CUDA_VERSION
+      all_paths:
+        - image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}-arm
+          src_path: /usr/local/cuda-${CUDA_VERSION}
+          dst_path: /usr/local/cuda-${CUDA_VERSION}
+      all_env:
+        PATH:
+          type: append
+          value: /usr/local/cuda-${CUDA_VERSION}/bin
+          separator: ':'
+        LD_LIBRARY_PATH:
+          type: append
+          value: /usr/local/cuda-${CUDA_VERSION}/lib64
+          separator: ':'

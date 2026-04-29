@@ -12,7 +12,7 @@ from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry, DockerLayerPrepared
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
@@ -44,7 +44,7 @@ class BuildGenerator(Action):
     def _generate_docker_image(
         self,
         docker_image: str,
-        layers_deps: dict[str, LayerDepConfig],
+        layers_deps: list[DockerLayerPrepared],
         cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
     ) -> tuple[str, str]:
@@ -53,25 +53,26 @@ class BuildGenerator(Action):
 
         lines.append(f"FROM {docker_image}")
 
-        for dep_name, dependency in layers_deps.items():
-            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
+        for dependency in layers_deps:
+            # TODO: jrabil: perform variable substitution when preparing the dependency
+            # dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
+            # layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
+            # for arg, value in dependency.arg_mapping.items():
+            #     if not dep_cfg.arg_mapping:
+            #         continue
+            #
+            #     if arg in dep_cfg.arg_mapping:
+            #         flag_name = dep_cfg.arg_mapping[arg].flag_name
+            #         flag_value = build_option[arg]
+            #
+            #         layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
+            # # TODO: jrabil: we split the tag here and only use the version in the name suffix, but maybe this will result in aliasing?
+            # name_suffix.append(layer_tag.split(":", 1)[1])
 
-            layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
-            for arg, value in dependency.arg_mapping.items():
-                if not dep_cfg.arg_mapping:
-                    continue
+            name_suffix.append(dependency.name)
 
-                if arg in dep_cfg.arg_mapping:
-                    flag_name = dep_cfg.arg_mapping[arg].flag_name
-                    flag_value = build_option[arg]
-
-                    layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
-            # TODO: jrabil: we split the tag here and only use the version in the name suffix, but maybe this will result in aliasing?
-            name_suffix.append(layer_tag.split(":", 1)[1])
-
-            lines.append(
-                f"COPY --from={layer_tag} {dep_cfg.build_location} {dep_cfg.build_location}"
-            )
+            for path in dependency.builder_paths:
+                lines.append(f"COPY --link --from={path.image_tag} {path.src_path} {path.dst_path}")
 
         return "\n".join(lines), "_".join(name_suffix)
 
@@ -171,16 +172,27 @@ class BuildGenerator(Action):
             for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
                 build_dir = self.generate_name(states_boolean, states_select)
 
+                arguments = reduce(BuildSystemArguments.merge, [
+                    # universal build arguments
+                    effective_run_config.build_args,
+
+                    # include build arguments for the current feature selection
+                    *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
+                    *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
+                ])
+
+                prepared_dependencies = [ d.prepare() for d in arguments.dependencies ]
+
                 builder_image = effective_builder_image
 
-                if len(run_config.layers_deps) > 0:
+                if len(prepared_dependencies) > 0:
                     logging.info(
                         f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
                     )
 
                     dockerfile_content, name_suffix = self._generate_docker_image(
                         builder_image,
-                        run_config.layers_deps,
+                        prepared_dependencies,
                         run_config.cpu_architecture,
                         states_select,
                     )
@@ -206,15 +218,6 @@ class BuildGenerator(Action):
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
-
-                arguments = reduce(BuildSystemArguments.merge, [
-                    # universal build arguments
-                    effective_run_config.build_args,
-
-                    # include build arguments for the current feature selection
-                    *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
-                    *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
-                ])
 
                 # environment variables from the build arguments should be defined when running CMake
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?

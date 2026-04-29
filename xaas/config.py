@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
+from mashumaro.types import Discriminator
 
 from xaas.util.dict_utils import union_distinct, union_merge
 
@@ -63,104 +65,6 @@ class SourceContainerAutomated(Enum):
 class Language(str, Enum):
     CXX = "cxx"
     FORTRAN = "fortran"
-
-
-@dataclass
-class DockerLayerVersion(BaseXaasConfigModel):
-    flag_name: str
-    build_args: dict[str, str]
-
-
-@dataclass
-class DockerLayer(BaseXaasConfigModel):
-    dockerfile: str
-    image_tag: str
-    versions: list[str]
-    version_arg: str
-    build_location: str
-    runtime_location: str
-    arg_mapping: dict[str, DockerLayerVersion] | None = None
-    envs: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class DockerLayers(BaseXaasConfigModel):
-    layers: dict[CPUArchitecture, dict[FeatureType, DockerLayer]]
-    layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]]
-
-    @staticmethod
-    def load(config_path: str) -> DockerLayers:
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
-
-        with open(config_path) as f:
-            return DockerLayers.from_yaml(f)
-
-
-class XaaSConfig:
-    _instance: XaaSConfig | None = None
-
-    DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
-    LAYERS_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "layers.yml")
-
-    @property
-    def initialized(self) -> bool:
-        return self._initialized
-
-    def __new__(cls) -> XaaSConfig:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-
-        return cls._instance
-
-    def __init__(self):
-        self._initialized: bool
-        self.ir_type: IRType
-        self.default_builder_image: str
-        self.default_runtime_image: str
-        self.parallelism_level: int
-        self.layers: DockerLayers
-
-    def initialize(self, config_path: str) -> None:
-        if self._initialized:
-            raise RuntimeError("Configuration already initialized")
-
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-        with open(config_path) as f:
-            config_data = yaml.safe_load(f)
-
-        self.parallelism_level = config_data["parallelism_level"]
-        self.default_builder_image = config_data["default_builder_image"]
-        self.default_runtime_image = config_data["default_runtime_image"]
-
-        match config_data["ir_type"]:
-            case IRType.LLVM_IR.value:
-                self.ir_type = IRType.LLVM_IR
-            case _:
-                raise ValueError(f"Unsupported IR type: {config_data['ir_type']}")
-
-        self.layers = DockerLayers.load(XaaSConfig.LAYERS_CONFIGURATION)
-
-        self._initialized = True
-
-
-class FeatureType(str, Enum):
-    OPENMP = "OPENMP"
-    MPI = "MPI"
-    CUDA = "CUDA"
-    ONEAPI = "ONEAPI"
-    ROCM = "ROCM"
-    SYCL = "SYCL"
-    ROCFFT = "ROCFFT"
-    FFTW3 = "FFTW3"
-    ICPX = "ICPX"
-
-
-class FeatureSelectionType(Enum):
-    VECTORIZATION = "VECTORIZATION"
 
 
 class ArgumentsVariableEntryType(Enum):
@@ -262,11 +166,209 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
 
 
 @dataclass
+class DockerLayerVersion(BaseXaasConfigModel):
+    flag_name: str
+    build_args: dict[str, str]
+
+
+@dataclass
+class DockerLayerCopyStep(BaseXaasConfigModel):
+    """
+    A specification of a single path for a dependency which will be copied into the resulting docker image.
+
+    This works like the Dockerfile COPY directive.
+    """
+
+    image_tag: str
+    src_path: str
+    dst_path: str
+
+
+@dataclass
+class DockerLayerPrepared(BaseXaasConfigModel):
+    """
+    A full specification of the Docker layers (and other properties) for a specific version of a dependency.
+    """
+
+    name: str
+
+    builder_paths: list[DockerLayerCopyStep]
+    runtime_paths: list[DockerLayerCopyStep]
+
+    builder_env: dict[str, ArgumentsVariableEntry]
+    runtime_env: dict[str, ArgumentsVariableEntry]
+
+
+# TODO: jrabil: rename this to DockerLayerTemplate or MultiVersionDockerLayer or something
+# TODO: jrabil: get rid of the many unnecessary fields here
+# TODO: jrabil: maybe turn the 'version' into an ordinary build argument
+@dataclass
+class DockerLayer(BaseXaasConfigModel):
+    """
+    A full specification of the Docker layers (and other properties) for a dependency which may support multiple versions or other arguments.
+    """
+
+    versions: list[str]
+    version_arg: str
+
+    dockerfile: str | None = None # TODO: jrabil: remove this
+    image_tag: str | None = None # TODO: jrabil: remove this
+    build_location: str | None = None # TODO: jrabil: remove this
+    runtime_location: str | None = None # TODO: jrabil: remove this
+    arg_mapping: dict[str, DockerLayerVersion] | None = None
+    envs: dict[str, str] = field(default_factory=dict) # TODO: jrabil: remove this
+
+    all_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+    builder_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+    runtime_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+
+    all_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+
+
+@dataclass
+class DockerLayers(BaseXaasConfigModel):
+    layers: dict[CPUArchitecture, dict[str, DockerLayer]]
+    layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]] | None = None # TODO: jrabil: remove this
+
+    @staticmethod
+    def load(config_path: str) -> DockerLayers:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            return DockerLayers.from_yaml(f)
+
+
+class XaaSConfig:
+    _instance: XaaSConfig | None = None
+
+    DEFAULT_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "system.yaml")
+    LAYERS_CONFIGURATION = os.path.join(Path(__file__).parent, "config", "layers.yml")
+
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
+
+    def __new__(cls) -> XaaSConfig:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+
+        return cls._instance
+
+    def __init__(self):
+        self._initialized: bool
+        self.ir_type: IRType
+        self.default_builder_image: str
+        self.default_runtime_image: str
+        self.parallelism_level: int
+        self.layers: DockerLayers
+
+    def initialize(self, config_path: str) -> None:
+        if self._initialized:
+            raise RuntimeError("Configuration already initialized")
+
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+        with open(config_path) as f:
+            config_data = yaml.safe_load(f)
+
+        self.parallelism_level = config_data["parallelism_level"]
+        self.default_builder_image = config_data["default_builder_image"]
+        self.default_runtime_image = config_data["default_runtime_image"]
+
+        match config_data["ir_type"]:
+            case IRType.LLVM_IR.value:
+                self.ir_type = IRType.LLVM_IR
+            case _:
+                raise ValueError(f"Unsupported IR type: {config_data['ir_type']}")
+
+        self.layers = DockerLayers.load(XaaSConfig.LAYERS_CONFIGURATION)
+
+        self._initialized = True
+
+
+@dataclass
+class LayerDepBase(BaseXaasConfigModel):
+    class Config(BaseXaasConfigModel.Config):
+        discriminator = Discriminator(field="type", include_subtypes=True)
+
+    # For some reason the type is ignored when serializing this class, so we'll add it manually
+    def __post_serialize__(self, d: dict) -> dict:
+        d['type'] = self.type
+        return d
+
+    def prepare(self) -> DockerLayerPrepared:
+        raise NotImplementedError
+
+
+@dataclass
+class LayerDepReference(LayerDepBase):
+    type: ClassVar[str] = "default"
+
+    name: str
+    version: str | None = None
+    arg_mapping: dict[str, str] | None = None
+
+    def prepare(self) -> DockerLayerPrepared:
+        # TODO: jrabil: implement this
+        raise NotImplementedError
+
+
+@dataclass
+class LayerDepCustom(LayerDepBase):
+    type: ClassVar[str] = "custom"
+
+    name: str
+    version: str | None = None
+
+    all_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+    builder_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+    runtime_paths: list[DockerLayerCopyStep] = field(default_factory=list)
+
+    all_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+    runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+
+    def prepare(self) -> DockerLayerPrepared:
+        return DockerLayerPrepared(
+            name = self.name,
+
+            builder_paths = self.all_paths + self.builder_paths,
+            runtime_paths = self.all_paths + self.runtime_paths,
+
+            builder_env = union_merge(self.all_env, self.builder_env, ArgumentsVariableEntry.merge),
+            runtime_env = union_merge(self.all_env, self.runtime_env, ArgumentsVariableEntry.merge),
+        )
+
+
+class FeatureType(str, Enum):
+    OPENMP = "OPENMP"
+    MPI = "MPI"
+    CUDA = "CUDA"
+    ONEAPI = "ONEAPI"
+    ROCM = "ROCM"
+    SYCL = "SYCL"
+    ROCFFT = "ROCFFT"
+    FFTW3 = "FFTW3"
+    ICPX = "ICPX"
+
+
+class FeatureSelectionType(Enum):
+    VECTORIZATION = "VECTORIZATION"
+
+
+@dataclass
 class BuildSystemArguments(BaseXaasConfigModel):
     environment: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     property: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
 
     arguments: list[str] = field(default_factory=list)
+
+    dependencies: list[LayerDepBase] = field(default_factory=list)
 
     @staticmethod
     def merge(a: BuildSystemArguments, b: BuildSystemArguments) -> BuildSystemArguments:
@@ -276,6 +378,9 @@ class BuildSystemArguments(BaseXaasConfigModel):
 
             # simply concatenate any additional arguments
             arguments = a.arguments + b.arguments,
+
+            # simply concatenate any additional dependencies
+            dependencies = a.dependencies + b.dependencies,
         )
 
 
@@ -297,6 +402,7 @@ class BuildResult(BaseXaasConfigModel):
     features_select: dict[str, str]
 
 
+# TODO: jrabil: remove this
 @dataclass
 class LayerDepConfig(BaseXaasConfigModel):
     version: str
@@ -343,7 +449,7 @@ class RunConfig(DataClassYAMLMixin):
     all_targets: PartialRunConfig
     cpu_specific: dict[CPUArchitecture, PartialRunConfig]
     additional_steps: list[list[str]]
-    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
+    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict) # TODO: jrabil: remove this
 
     @classmethod
     def load(cls, config_path: str) -> RunConfig:
