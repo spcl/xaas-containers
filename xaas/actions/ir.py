@@ -160,7 +160,8 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=build.builder_image,
+                # TODO: jrabil: when falling back, we need to respect environment variables and copy stages
+                image=build.prepared_builder_image or build.builder_image.base_image,
                 mounts=volumes,
                 remove=False,
                 detach=True,

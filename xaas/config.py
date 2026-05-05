@@ -211,7 +211,6 @@ class DockerLayer(BaseXaasConfigModel):
     versions: list[str]
     version_arg: str
 
-    dockerfile: str | None = None # TODO: jrabil: remove this
     image_tag: str | None = None # TODO: jrabil: remove this
     build_location: str | None = None # TODO: jrabil: remove this
     runtime_location: str | None = None # TODO: jrabil: remove this
@@ -225,6 +224,30 @@ class DockerLayer(BaseXaasConfigModel):
     all_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
+
+    def _subst_string(self, version: str, val: str) -> str:
+        return val.replace(f"${{{self.version_arg}}}", version)
+
+    def _prepare_copy_step(self, version: str, step: DockerLayerCopyStep) -> DockerLayerCopyStep:
+        return DockerLayerCopyStep(
+            image_tag=self._subst_string(version, step.image_tag),
+            src_path=self._subst_string(version, step.src_path),
+            dst_path=self._subst_string(version, step.dst_path),
+        )
+
+    def prepare(self, name: str, version: str, arg_mapping: dict[str, str] | None) -> DockerLayerPrepared:
+        # TODO: jrabil: use arg_mapping in some way
+        # TODO: jrabil: implement fallback when arg_mapping is None
+
+        return DockerLayerPrepared(
+            name=name,
+
+            builder_paths=[ self._prepare_copy_step(version, step) for step in self.all_paths + self.builder_paths ],
+            runtime_paths=[ self._prepare_copy_step(version, step) for step in self.all_paths + self.runtime_paths ],
+
+            builder_env=union_merge(self.all_env, self.builder_env, ArgumentsVariableEntry.merge),
+            runtime_env=union_merge(self.all_env, self.runtime_env, ArgumentsVariableEntry.merge),
+        )
 
 
 @dataclass
@@ -301,7 +324,7 @@ class LayerDepBase(BaseXaasConfigModel):
         d['type'] = self.type
         return d
 
-    def prepare(self) -> DockerLayerPrepared:
+    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
         raise NotImplementedError
 
 
@@ -310,12 +333,11 @@ class LayerDepReference(LayerDepBase):
     type: ClassVar[str] = "default"
 
     name: str
-    version: str | None = None
+    version: str
     arg_mapping: dict[str, str] | None = None
 
-    def prepare(self) -> DockerLayerPrepared:
-        # TODO: jrabil: implement this
-        raise NotImplementedError
+    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
+        return XaaSConfig().layers.layers[cpu_architecture][self.name].prepare(self.name, self.version, self.arg_mapping)
 
 
 @dataclass
@@ -333,7 +355,7 @@ class LayerDepCustom(LayerDepBase):
     builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
 
-    def prepare(self) -> DockerLayerPrepared:
+    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
         return DockerLayerPrepared(
             name = self.name,
 
@@ -391,15 +413,6 @@ class FeatureConfigBoolean(BaseXaasConfigModel):
 
     def args_for_state(self, state: bool) -> BuildSystemArguments:
         return self.enabled if state else self.disabled
-
-
-@dataclass
-class BuildResult(BaseXaasConfigModel):
-    directory: str
-    builder_image: str
-    runtime_image: str
-    features_boolean: dict[FeatureType, bool]
-    features_select: dict[str, str]
 
 
 # TODO: jrabil: remove this
@@ -489,6 +502,59 @@ class RunConfig(DataClassYAMLMixin):
                 return True
 
         return False
+
+
+@dataclass
+class DerivedDockerImageDescriptor(BaseXaasConfigModel):
+    """
+    Describes a Docker image which may have some modifications.
+    """
+
+    base_image: str
+    paths: list[DockerLayerCopyStep] | None = None
+    env: dict[str, ArgumentsVariableEntry] | None = None
+
+    @staticmethod
+    def create_builder_and_runtime(
+            builder_base_image: str,
+            runtime_base_image: str,
+            layers: list[DockerLayerPrepared],
+    ) -> tuple[DerivedDockerImageDescriptor, DerivedDockerImageDescriptor]:
+        builder_paths = None
+        runtime_paths = None
+
+        builder_env = None
+        runtime_env = None
+
+        for layer in layers:
+            if len(layer.builder_paths) > 0:
+                builder_paths = (builder_paths or []) + layer.builder_paths
+            if len(layer.runtime_paths) > 0:
+                runtime_paths = (runtime_paths or []) + layer.runtime_paths
+
+            if layer.builder_env:
+                builder_env = union_merge(builder_env or {}, layer.builder_env, ArgumentsVariableEntry.merge)
+            if layer.runtime_env:
+                runtime_env = union_merge(runtime_env or {}, layer.runtime_env, ArgumentsVariableEntry.merge)
+
+        builder_descriptor = DerivedDockerImageDescriptor(base_image=builder_base_image, paths=builder_paths, env=builder_env)
+        runtime_descriptor = DerivedDockerImageDescriptor(base_image=runtime_base_image, paths=runtime_paths, env=runtime_env)
+        return builder_descriptor, runtime_descriptor
+
+
+@dataclass
+class BuildResult(BaseXaasConfigModel):
+    directory: str
+
+    features_boolean: dict[FeatureType, bool]
+    features_select: dict[str, str]
+
+    builder_image: DerivedDockerImageDescriptor
+    runtime_image: DerivedDockerImageDescriptor
+
+    # these are tags for the docker images which have been pre-staged to build the image, if any
+    prepared_builder_image: str | None = None
+    prepared_runtime_image: str | None = None
 
 
 @dataclass

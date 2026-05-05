@@ -12,13 +12,11 @@ from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry, DockerLayerPrepared
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry, DockerLayerPrepared, DerivedDockerImageDescriptor
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
-from xaas.config import XaaSConfig
 from xaas.config import RunConfig
-from xaas.config import FeatureSelectionType, LayerDepConfig
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
@@ -166,8 +164,9 @@ class BuildGenerator(Action):
         #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid messing up the indentation
         if True:
             # TODO: jrabil: automatically build for multiple configurations
-            effective_run_config = run_config.for_target(run_config.cpu_architecture)
-            effective_builder_image, effective_runtime_image = effective_run_config.effective_docker_images()
+            effective_cpu_architecture = run_config.cpu_architecture
+            effective_run_config = run_config.for_target(effective_cpu_architecture)
+            effective_base_builder_image, effective_base_runtime_image = effective_run_config.effective_docker_images()
 
             for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
                 build_dir = self.generate_name(states_boolean, states_select)
@@ -181,9 +180,11 @@ class BuildGenerator(Action):
                     *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
                 ])
 
-                prepared_dependencies = [ d.prepare() for d in arguments.dependencies ]
+                prepared_dependencies = [ d.prepare(effective_cpu_architecture) for d in arguments.dependencies ]
 
-                builder_image = effective_builder_image
+                builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
+
+                prepared_builder_image = effective_base_builder_image
 
                 if len(prepared_dependencies) > 0:
                     logging.info(
@@ -191,9 +192,9 @@ class BuildGenerator(Action):
                     )
 
                     dockerfile_content, name_suffix = self._generate_docker_image(
-                        builder_image,
+                        prepared_builder_image,
                         prepared_dependencies,
-                        run_config.cpu_architecture,
+                        effective_cpu_architecture,
                         states_select,
                     )
 
@@ -205,25 +206,25 @@ class BuildGenerator(Action):
                     logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
 
                     logging.info(
-                        f"[{self.name}] Building Docker image based on {builder_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
+                        f"[{self.name}] Building Docker image based on {effective_base_builder_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
                     )
 
-                    builder_image = self.docker_runner.build(
+                    prepared_builder_image = self.docker_runner.build(
                         dockerfile=os.path.join(name_suffix, "Dockerfile"),
                         path=os.path.join(working_dir, "images"),
                         tag=None,
                     ).id
 
-                    logging.info(f"[{self.name}] Successfully built Docker image {builder_image}")
+                    logging.info(f"[{self.name}] Successfully built Docker image {prepared_builder_image}")
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
 
                 # environment variables from the build arguments should be defined when running CMake
                 # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
-                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(builder_image))
+                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(prepared_builder_image))
 
-                target_triple = TargetTriple.from_cpu_architecture(run_config.cpu_architecture)
+                target_triple = TargetTriple.from_cpu_architecture(effective_cpu_architecture)
 
                 toolchain_file_name = "toolchain.cmake"
                 toolchain_lines = [
@@ -236,7 +237,7 @@ class BuildGenerator(Action):
                     toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
-                    f"Executing build in {new_dir}, image {builder_image}, combination: {states_boolean | states_select}"
+                    f"Executing build in {new_dir}, image {prepared_builder_image}, combination: {states_boolean | states_select}"
                 )
 
                 cmake_command: list[str] = [
@@ -275,16 +276,19 @@ class BuildGenerator(Action):
 
                 res = BuildResult(
                     directory=new_dir,
-                    builder_image=builder_image,
-                    runtime_image=effective_runtime_image,
                     features_boolean=states_boolean,
-                    features_select=states_select
+                    features_select=states_select,
+
+                    builder_image=builder_image_desc,
+                    runtime_image=runtime_image_desc,
+
+                    prepared_builder_image=prepared_builder_image,
                 )
 
                 containers.append(
                     (
                         self.docker_runner.run(
-                            image=builder_image,
+                            image=prepared_builder_image,
                             command=[ "bash", "-c", configure_cmd ],
                             environment=cmake_environment,
                             mounts=volumes,
