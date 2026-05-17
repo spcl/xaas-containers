@@ -45,7 +45,7 @@ class BuildGenerator(Action):
         layers_deps: list[DockerLayerPrepared],
         cpu_architecture: CPUArchitecture,
         build_option: dict[str, str],
-    ) -> tuple[str, str]:
+    ) -> tuple[list[str], str]:
         lines: list[str] = []
         name_suffix: list[str] = []
 
@@ -72,7 +72,7 @@ class BuildGenerator(Action):
             for path in dependency.builder_paths:
                 lines.append(f"COPY --link --from={path.image_tag} {path.src_path} {path.dst_path}")
 
-        return "\n".join(lines), "_".join(name_suffix)
+        return lines, "_".join(name_suffix)
 
     def execute(self, run_config: RunConfig) -> bool:
         logging.info(f"[{self.name}] Building project {run_config.project_name}")
@@ -191,27 +191,23 @@ class BuildGenerator(Action):
                         f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
                     )
 
-                    dockerfile_content, name_suffix = self._generate_docker_image(
+                    dockerfile_lines, name_suffix = self._generate_docker_image(
                         prepared_builder_image,
                         prepared_dependencies,
                         effective_cpu_architecture,
                         states_select,
                     )
 
-                    dockerfile_path = os.path.join(working_dir, "images", name_suffix, "Dockerfile")
-                    os.makedirs(os.path.join(working_dir, "images", name_suffix), exist_ok=True)
-
-                    with open(dockerfile_path, "w") as f:
-                        f.write(dockerfile_content)
-                    logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
+                    build_working_dir = os.path.join(working_dir, "images")
+                    os.makedirs(build_working_dir, exist_ok=True)
 
                     logging.info(
-                        f"[{self.name}] Building Docker image based on {effective_base_builder_image} for {run_config.project_name} with '{name_suffix}', in {working_dir}"
+                        f"[{self.name}] Building Docker image based on {effective_base_builder_image} for {run_config.project_name} with '{name_suffix}', in {build_working_dir}"
                     )
 
                     prepared_builder_image = self.docker_runner.build(
-                        dockerfile=os.path.join(name_suffix, "Dockerfile"),
-                        path=os.path.join(working_dir, "images"),
+                        dockerfile_lines=dockerfile_lines,
+                        path=build_working_dir,
                         tag=None,
                     ).id
 

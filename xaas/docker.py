@@ -1,6 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
+from io import BytesIO
 
 import docker
 from docker.models.containers import Container
@@ -24,19 +25,32 @@ class Runner:
 
     def build(
         self,
-        dockerfile: str,
         path: str,
-        tag: str,
+        dockerfile: str | None = None,
+        dockerfile_lines: list[str] | None = None,
+        tag: str | None = None,
         build_args: dict[str, str] | None = None,
         platform: str | None = None,
     ) -> Image:
+        """
+        Builds a Docker image.
+
+        :param path: the path to the build context directory
+        :param dockerfile: the name of the Dockerfile to use (optional). Ignored if ``dockerfile_lines`` is set.
+        :param dockerfile_lines: the lines of the dockerfile's code (optional)
+        :param tag: the tag to assign the build result (optional). If ``None`` (default), the resulting image will not be tagged.
+        :return: a reference to the completed docker image
+        """
+
         try:
             image, _ = self.client.images.build(
-                dockerfile=dockerfile,
                 path=path,
+                dockerfile=dockerfile,
+                fileobj=BytesIO("\n".join(dockerfile_lines).encode()) if dockerfile_lines is not None else None,
                 tag=tag,
                 buildargs=build_args or {},
                 platform=(f"linux/{platform}" if platform is not None else None),
+                rm=True,
             )
             return image
         except docker.errors.APIError as e:
