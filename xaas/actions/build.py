@@ -39,6 +39,7 @@ class BuildGenerator(Action):
     def __init__(self):
         super().__init__(name="build", description="Builds the project with specified features")
 
+    # TODO: jrabil: this is unused now, delete it once i finish porting over the variable expansion code
     def _generate_docker_image(
         self,
         docker_image: str,
@@ -115,25 +116,6 @@ class BuildGenerator(Action):
         return True
 
     @staticmethod
-    def _generate_subsets(
-        features: list[FeatureType],
-    ) -> list[dict[FeatureType, bool]]:
-        features_count = len(features)
-        num_subsets = 2**features_count
-        all_subsets = []
-
-        """
-        We generate all 2^n combinations by using bit positions of all integers from 0 to 2^n - 1
-        """
-        for i in range(num_subsets):
-            states : dict[FeatureType, bool] = dict()
-            for j in range(features_count):
-                states[features[j]] = i & (1 << j) > 0
-            all_subsets.append(states)
-
-        return all_subsets
-
-    @staticmethod
     def _all_feature_permutations(config: PartialRunConfig) -> Generator[tuple[dict[FeatureType, bool], dict[str, str]], None, None]:
         permutations_boolean = [
             [tuple([feature, False]), tuple([feature, True])] for feature in config.features_boolean.keys()
@@ -161,6 +143,8 @@ class BuildGenerator(Action):
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
+        empty_dir_path = os.path.join(working_dir, "empty_dir")
+
         #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid messing up the indentation
         if True:
             # TODO: jrabil: automatically build for multiple configurations
@@ -184,34 +168,7 @@ class BuildGenerator(Action):
 
                 builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
 
-                prepared_builder_image = effective_base_builder_image
-
-                if len(prepared_dependencies) > 0:
-                    logging.info(
-                        f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
-                    )
-
-                    dockerfile_lines, name_suffix = self._generate_docker_image(
-                        prepared_builder_image,
-                        prepared_dependencies,
-                        effective_cpu_architecture,
-                        states_select,
-                    )
-
-                    build_working_dir = os.path.join(working_dir, "images")
-                    os.makedirs(build_working_dir, exist_ok=True)
-
-                    logging.info(
-                        f"[{self.name}] Building Docker image based on {effective_base_builder_image} for {run_config.project_name} with '{name_suffix}', in {build_working_dir}"
-                    )
-
-                    prepared_builder_image = self.docker_runner.build(
-                        dockerfile_lines=dockerfile_lines,
-                        path=build_working_dir,
-                        tag=None,
-                    ).id
-
-                    logging.info(f"[{self.name}] Successfully built Docker image {prepared_builder_image}")
+                prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner, empty_dir_path)
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)

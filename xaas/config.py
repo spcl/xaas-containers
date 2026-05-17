@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 import shlex
 from dataclasses import dataclass
@@ -13,7 +14,9 @@ from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from mashumaro.types import Discriminator
 
+from xaas.docker import Runner as DockerRunner
 from xaas.util.dict_utils import union_distinct, union_merge
+from xaas.util.dockerfile import DockerfileStage, DockerfileStep, EnvStep, CopyStep, RunStep, DockerfileBuilder
 
 
 class BaseXaasConfigModel(DataClassYAMLMixin):
@@ -116,17 +119,20 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
         # Refuse to handle any other combination
         raise RuntimeError(f"Mismatched variable update types: {a} and {b}")
 
-    def to_shell_export(self, name: str) -> list[str]:
+    def to_shell(self, name: str) -> str:
         """
-        Gets a shell 'export' command which sets or updates this variable's value.
+        Gets a shell directive which sets or updates this variable's value.
 
-        Returns a single quoted shell command.
+        This may be prepended directly to a command to set the value for a specific command invocation, or prefixed
+        with ``export`` to set the value globally.
+
+        :return: a single quoted shell directive
         """
 
         if self.type is ArgumentsVariableEntryType.APPEND:
-            return [ "export", f'{name}="${{{name}}}${{{name}:+{self.separator}}}"{shlex.quote(self.value)}' ]
+            return f'{name}="${{{name}}}${{{name}:+{self.separator}}}"{shlex.quote(self.value)}'
         elif self.type is ArgumentsVariableEntryType.SET:
-            return [ "export", f'{name}={shlex.quote(self.value)}' ]
+            return f'{name}={shlex.quote(self.value)}'
         else:
             raise RuntimeError(f"Unknown type: {self.type}")
 
@@ -163,6 +169,24 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
         """
 
         return [ f"-D{name}={entry.value}" for name, entry in entries.items() ]
+
+    @staticmethod
+    def reduce_to_dockerfile_env(entries: dict[str, ArgumentsVariableEntry]) -> dict[str, str]:
+        """
+        Reduces a group of argument variables down to a single dict containing escaped key-value mappings, suitable to include in a Dockerfile ENV directive.
+
+        :param entries: the argument variable entries
+        """
+
+        result: dict[str, str] = {}
+        for name, entry in entries.items():
+            if entry.type is ArgumentsVariableEntryType.APPEND:
+                result[name] = f'${{{name}}}${{{name}:+{entry.separator}}}{shlex.quote(entry.value)}'
+            elif entry.type is ArgumentsVariableEntryType.SET:
+                result[name] = shlex.quote(entry.value)
+            else:
+                raise RuntimeError(f"Unknown type: {entry.type}")
+        return result
 
 
 @dataclass
@@ -540,6 +564,107 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
         builder_descriptor = DerivedDockerImageDescriptor(base_image=builder_base_image, paths=builder_paths, env=builder_env)
         runtime_descriptor = DerivedDockerImageDescriptor(base_image=runtime_base_image, paths=runtime_paths, env=runtime_env)
         return builder_descriptor, runtime_descriptor
+
+    def prepared_dockerfile_stage(self) -> DockerfileStage:
+        """
+        Gets a :py:class:`~xaas.util.dockerfile.DockerfileStage` which will result in an image fully configured according to this descriptor.
+
+        Specifically, the resulting image will contain all necessary environment variables and have all paths copied.
+        """
+
+        steps: list[DockerfileStep] = []
+
+        if self.env:
+            steps.append(EnvStep(ArgumentsVariableEntry.reduce_to_dockerfile_env(self.env)))
+
+        for path in (self.paths or []):
+            steps.append(CopyStep(
+                from_context=path.image_tag,
+                src=path.src_path,
+                dst=path.dst_path,
+            ))
+
+        return DockerfileStage(from_context=self.base_image, steps=steps)
+
+    def run_in_prepared_context(self, dockerfile_builder: DockerfileBuilder, orig_run_step: RunStep) -> DockerfileStage:
+        """
+        Tries to adapt the given :py:class:`~xaas.util.dockerfile.RunStep` so that it will run in a context equivalent
+        to an image fully configured according to this descriptor. This assumes that the given
+        :py:class:`~xaas.util.dockerfile.RunStep` is being executed in a stage whose base image is :py:attr:`~.base_image`.
+
+        A return value of ``None`` indicates that it is not possible to represent the derived image using only bind
+        mounts and shell environment overrides, in which case the :py:class:`~xaas.util.dockerfile.RunStep` should be
+        executed in a stage whose base image is :py:func:`~.prepared_dockerfile_stage`.
+
+        :param dockerfile_builder: the :py:class:`~xaas.util.dockerfile.DockerfileBuilder` to use if additional stages need to be built
+        :param orig_run_step: the original :py:class:`~xaas.util.dockerfile.RunStep` to adapt
+        :return: the adapted :py:class:`~xaas.util.dockerfile.RunStep`, or ``Ǹone`` if not possible
+        """
+
+        # if None, we'll have to fall back to preparing the whole derived image in a separate stage
+        inline_run_step: RunStep | None = orig_run_step
+
+        if inline_run_step is not None and self.paths:
+            # add bind mount entries for each of the requested paths
+            # TODO: jrabil: in some cases this may be impossible, in which case we should set inline_run_step to None
+
+            bind_mounts = [ RunStep.BindMount(
+                from_context=path.image_tag,
+                source=path.src_path,
+                target=path.dst_path,
+            ) for path in self.paths ]
+
+            inline_run_step = dataclasses.replace(inline_run_step, mounts=bind_mounts + inline_run_step.mounts)
+
+        if inline_run_step is not None and self.env:
+            # prepend the command with some shell code which exports the updated environment variables
+            # (this always converts the command to shell form)
+
+            export_statements = "".join([ f"export {entry.to_shell(name)}; " for name, entry in self.env.items()])
+
+            inline_run_step = dataclasses.replace(inline_run_step, command=export_statements + inline_run_step.get_command_in_shell_form())
+
+        if inline_run_step is not None:
+            # the derived image is similar enough to the base image that it can be described inline in the RUN step
+            return DockerfileStage(
+                from_context=self.base_image,
+                steps=[ inline_run_step ],
+            )
+
+        # TODO: jrabil: the prepared image might have already been built if this descriptor is a child of a BuildResult, ideally we should re-use that whenever possible
+
+        # fallback: prepare the whole derived docker image in a separate stage
+        prepared_stage = self.prepared_dockerfile_stage()
+        prepared_stage_name = dockerfile_builder.add_stage(prepared_stage)
+
+        return DockerfileStage(
+            from_context=prepared_stage_name,
+            steps=[ orig_run_step ],
+        )
+
+    def build_prepared_image(self, docker_runner: DockerRunner, empty_dir_path: str) -> str:
+        """
+        Gets the tag of a Docker image fully configured according to this descriptor. This may cause the image to be
+        built if necessary.
+
+        :param docker_runner: the Docker API client instance
+        :param empty_dir_path: an absolute filesystem path to an empty directory
+        :return: a Docker image tag
+        """
+
+        if not self.env and not self.paths:
+            # the derived image is exactly the same as the base
+            return self.base_image
+
+        os.makedirs(empty_dir_path, exist_ok=True)
+
+        dockerfile_lines = DockerfileBuilder().build(self.prepared_dockerfile_stage()).to_dockerfile_lines()
+
+        return docker_runner.build(
+            path=empty_dir_path,
+            dockerfile_lines=dockerfile_lines,
+            tag=None,
+        ).id
 
 
 @dataclass
