@@ -4,18 +4,18 @@ layers:
       versions: ['4.3.0']
       version_arg: MPICH_VERSION
       builder_paths:
-        - image_tag: docker.io/spcleth/xaas:mpich
+        - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
           dst_path: /opt/mpich
       runtime_paths:
-        - image_tag: docker.io/spcleth/xaas:mpich
+        - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
           dst_path: /opt/mpich
     cuda:
       versions: ['12.1', '12.8', '12.9']
       version_arg: CUDA_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}
+        - image_tag: docker.io/spcleth/xaas:layer-cuda${CUDA_VERSION}
           src_path: /usr/local/cuda-${CUDA_VERSION}
           dst_path: /usr/local/cuda-${CUDA_VERSION}
       all_env:
@@ -54,7 +54,7 @@ layers:
       versions: ['2021.3.0', '2025.0']
       version_arg: ONEAPI_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:oneapi-${ONEAPI_VERSION}
+        - image_tag: docker.io/spcleth/xaas:layer-oneapi${ONEAPI_VERSION}
           src_path: /opt/intel
           dst_path: /opt/intel
       arg_mapping:

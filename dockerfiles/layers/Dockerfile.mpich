@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.4
+# 1.4: COPY --link
+
+ARG XAAS_IMAGE_PREFIX
+ARG DEBIAN_VERSION
+ARG LLVM_VERSION
+
+
+FROM ${XAAS_IMAGE_PREFIX}compiler-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION} AS builder
+
+ARG MPICH_VERSION
+
+WORKDIR /tmp
+USER root
+
+RUN curl -L https://www.mpich.org/static/downloads/${MPICH_VERSION}/mpich-${MPICH_VERSION}.tar.gz | tar zx \
+    && cd mpich-${MPICH_VERSION} \
+    && ./configure --prefix=/opt/mpich \
+    && make -j$( nproc ) && make install \
+    && cd .. && rm -r mpich-${MPICH_VERSION}
+
+
+FROM scratch
+
+COPY --link --from=builder /opt/mpich /opt/mpich

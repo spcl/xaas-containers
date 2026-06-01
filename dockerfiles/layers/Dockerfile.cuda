@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.4
+# 1.2: RUN --mount
+# 1.4: COPY --link
+
+ARG XAAS_IMAGE_PREFIX
+ARG DEBIAN_VERSION
+ARG LLVM_VERSION
+ARG CUDA_VERSION
+
+# Inheriting from the compiler image so that we get build-essential (which is used by the CUDA toolchain)
+FROM ${XAAS_IMAGE_PREFIX}compiler-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION} AS builder
+
+ARG DEBIAN_VERSION
+ARG CUDA_VERSION
+
+# Add CUDA repository
+RUN --mount=type=tmpfs,target=/tmp --mount=type=tmpfs,target=/var/log/apt \
+    curl -o /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/debian${DEBIAN_VERSION}/x86_64/cuda-keyring_1.1-1_all.deb \
+    && eatmydata dpkg -i /tmp/cuda-keyring.deb
+
+# Install the entire CUDA toolchain
+# TODO: jrabil: this includes WAY more things than we need. We could probably get away with just cuda-compiler...
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install -y --no-install-recommends \
+        cuda-toolkit-${CUDA_VERSION}
+
+
+FROM scratch
+
+ARG CUDA_VERSION
+
+COPY --link --from=builder /usr/local/cuda-${CUDA_VERSION} /usr/local/cuda-${CUDA_VERSION}

@@ -1,13 +1,11 @@
 # syntax=docker/dockerfile:1.2
 # 1.2: RUN --mount
 
-FROM spcleth/xaas:llvm-19
+ARG XAAS_IMAGE_PREFIX
 
+FROM ${XAAS_IMAGE_PREFIX}base-debian13 AS runner-debian13-llvm19
+
+# TODO: jrabil: this should really be pulled in as-needed by the OPENMP dependency
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
     eatmydata apt-get update && eatmydata apt-get install -y \
-    libclang-19-dev \
-    libzstd-dev
-
-RUN mkdir /tools 
-ADD tools/llvm-features /tools/feature-analyzer
-RUN cd /tools/feature-analyzer && cmake -DCMAKE_BUILD_TYPE=Release . && make -j$( nproc )
+        libomp5-${LLVM_VERSION}
