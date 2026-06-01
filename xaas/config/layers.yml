@@ -7,6 +7,8 @@ layers:
         - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
           dst_path: /opt/mpich
+      builder_env:
+        MPI_HOME: '/opt/mpich'
       runtime_paths:
         - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
