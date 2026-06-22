@@ -1,13 +1,17 @@
 #!/bin/bash
 set -e
+set -u
 
-DOCKER_COMMAND="docker"
-XAAS_IMAGE_PREFIX="docker.io/spcleth/xaas:"
-
-CONTEXT_PATH=.
+XAAS_SYSTEM_REPO="docker.io/spcleth/xaas"
+XAAS_SYSTEM_VERSION="1_rc1"
 
 DEBIAN_VERSION=13
 LLVM_VERSION=19
+
+DOCKER_COMMAND="docker"
+XAAS_IMAGE_PREFIX="${XAAS_SYSTEM_REPO}:${XAAS_SYSTEM_VERSION}-"
+
+CONTEXT_PATH=.
 
 BUILD_ARGS=(
   --build-arg=XAAS_IMAGE_PREFIX="${XAAS_IMAGE_PREFIX}"
@@ -34,7 +38,7 @@ BUILD_ARGS=(
 
 # build layers
 
-for CUDA_VERSION in "13.3"; do
+for CUDA_VERSION in "13.1" "13.3"; do
   "$DOCKER_COMMAND" build "${BUILD_ARGS[@]}" \
       --build-arg=CUDA_VERSION="${CUDA_VERSION}" \
       --tag="${XAAS_IMAGE_PREFIX}layer-cuda${CUDA_VERSION}" \

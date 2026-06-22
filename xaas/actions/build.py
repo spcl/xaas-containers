@@ -164,7 +164,7 @@ class BuildGenerator(Action):
                     *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
                 ])
 
-                prepared_dependencies = [ d.prepare(effective_cpu_architecture) for d in arguments.dependencies ]
+                prepared_dependencies = [ d.prepare(effective_cpu_architecture, states_boolean, states_select) for d in arguments.dependencies ]
 
                 builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
 

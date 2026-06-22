@@ -4,20 +4,20 @@ layers:
       versions: ['4.3.0']
       version_arg: MPICH_VERSION
       builder_paths:
-        - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
           dst_path: /opt/mpich
       builder_env:
         MPI_HOME: '/opt/mpich'
       runtime_paths:
-        - image_tag: docker.io/spcleth/xaas:layer-mpich${MPICH_VERSION}
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-mpich${MPICH_VERSION}
           src_path: /opt/mpich
           dst_path: /opt/mpich
     cuda:
-      versions: ['12.1', '12.8', '12.9']
+      versions: ['13.1', '13.3']
       version_arg: CUDA_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:layer-cuda${CUDA_VERSION}
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-cuda${CUDA_VERSION}
           src_path: /usr/local/cuda-${CUDA_VERSION}
           dst_path: /usr/local/cuda-${CUDA_VERSION}
       all_env:
@@ -33,7 +33,8 @@ layers:
       versions: ['3.3.10']
       version_arg: FFTW3_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:deps-fftw3-${version}-${SIMD_FLAG}
+          # TODO: jrabil: upgrade this image
+        - image_tag: docker.io/spcleth/xaas:deps-fftw3-${FFTW3_VERSION}-${SIMD_FLAG}
           src_path: /opt/fftw3
           dst_path: /opt/fftw3
       all_env:
@@ -56,7 +57,7 @@ layers:
       versions: ['2021.3.0', '2025.0']
       version_arg: ONEAPI_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:layer-oneapi${ONEAPI_VERSION}
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-oneapi${ONEAPI_VERSION}
           src_path: /opt/intel
           dst_path: /opt/intel
       arg_mapping:
@@ -70,7 +71,7 @@ layers:
       versions: ['12.6']
       version_arg: CUDA_VERSION
       all_paths:
-        - image_tag: docker.io/spcleth/xaas:cuda-${CUDA_VERSION}-arm
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-cuda-${CUDA_VERSION}-arm
           src_path: /usr/local/cuda-${CUDA_VERSION}
           dst_path: /usr/local/cuda-${CUDA_VERSION}
       all_env:

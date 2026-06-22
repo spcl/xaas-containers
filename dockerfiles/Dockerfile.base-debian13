@@ -13,6 +13,9 @@ RUN apt-get clean autoclean \
     && rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
+# install auto-apt-proxy to autodetect available apt proxies if available
 # install eatmydata for Speed:tm:
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
-    apt-get update && apt-get install -y eatmydata
+    apt-get update && apt-get install -y --no-install-recommends \
+        auto-apt-proxy \
+        eatmydata

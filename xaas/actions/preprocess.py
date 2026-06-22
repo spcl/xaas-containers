@@ -304,6 +304,9 @@ class ClangPreprocesser(Action):
 
                             original_processed_file = next(result_iter)
                             if not original_processed_file:
+                                # TODO: jrabil: raise errors instead of failing silently
+                                raise RuntimeError(f"Original processed file for {target} is None???")
+
                                 logging.error("Skip because of an error")
 
                                 # drop results
@@ -348,15 +351,25 @@ class ClangPreprocesser(Action):
         command: CompileCommand,
         working_dir: str,
     ) -> tuple[str, bool] | None:
-        compiler = ""
+        """
+        :return: a tuple (the preprocessed file path, bool flag which is True if the file uses OpenMP)
+        """
+
+        compiler = None
 
         if command.compiler_type == Compiler.CLANG:
+            # TODO: jrabil: why are we not using the actual clang binary from command.compiler here?
             compiler = self.CLANG_PATH
         elif command.compiler_type == Compiler.NVCC:
             compiler = command.compiler
         else:
             logging.error(f"Unsupported compiler {command.compiler}!")
+            # TODO: jrabil: raise errors instead of failing silently
+            raise RuntimeError(f"Unsupported compiler {command.compiler}!")
+
             return None
+
+        assert compiler is not None, f"Couldn't determine compiler executable for {command}"
 
         """
         Remove comments.
@@ -379,12 +392,19 @@ class ClangPreprocesser(Action):
         preprocess_cmd.extend(command.includes)
         preprocess_cmd.extend(command.definitions)
 
+        # this will include the '-x cu' flag if necessary
+        preprocess_cmd.extend(command.others)
+
         """
             For CUDA, the additional includes can be hidden in response files.
         """
         if command.compiler_type == Compiler.NVCC:
-            for file in cast(NVCCCompileCommand, command).response_files:
+            nvcc_command = cast(NVCCCompileCommand, command)
+            for file in nvcc_command.response_files:
                 preprocess_cmd.append(f"--options-file={file}")
+
+            if nvcc_command.ccbin is not None:
+                preprocess_cmd.append(f"-ccbin={nvcc_command.ccbin}")
 
         # OpenMP adds its own preprocessing directive
         preprocess_cmd.extend(command.flags)
@@ -401,14 +421,15 @@ class ClangPreprocesser(Action):
         if not self.dry_run:
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
-                logging.error(f"Error preprocessing {target}: {output}")
-                logging.error(f"Command {cmd}")
+                logging.error(f"Error preprocessing {target}: {output.decode("utf-8")}")
+                # TODO: jrabil: raise errors instead of failing silently
+                raise RuntimeError(f"Error preprocessing {target}:\n\t{output.decode("utf-8")}\n\tCommand: {cmd}")
+
                 return None
         else:
             # create empty path to allow other parts of the pipeline to work.
-            code, output = self.docker_runner.exec_run(
-                container, ["/bin/bash", "-c", f"echo test > {preprocessed_file}"], working_dir
-            )
+            with open(preprocessed_file, "w") as f:
+                f.write("test\n")
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
             command.flags
@@ -424,6 +445,9 @@ class ClangPreprocesser(Action):
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error OMP processing {target}: {output}")
+                # TODO: jrabil: raise errors instead of failing silently
+                raise RuntimeError(f"Error OMP processing {target}:\n\t{output}")
+
                 return None
 
             return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")

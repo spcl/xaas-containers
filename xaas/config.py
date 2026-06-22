@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import ClassVar
 
+import expandvars
 import yaml
 from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
@@ -17,6 +19,15 @@ from mashumaro.types import Discriminator
 from xaas.docker import Runner as DockerRunner
 from xaas.util.dict_utils import union_distinct, union_merge
 from xaas.util.dockerfile import DockerfileStage, DockerfileStep, EnvStep, CopyStep, RunStep, DockerfileBuilder
+
+
+def _variable_expand(raw: str, mapping: dict[str, str]) -> str:
+    # wrap mapping in MappingProxyType to disallow '${NAME:=value}' syntax from modifying global state
+    return expandvars.expand(raw, nounset=True, environ=MappingProxyType(mapping))
+
+
+def _variable_escape(raw: str) -> str:
+    return raw.replace("\\", "\\\\").replace("$", "\\$")
 
 
 class BaseXaasConfigModel(DataClassYAMLMixin):
@@ -68,6 +79,22 @@ class SourceContainerAutomated(Enum):
 class Language(str, Enum):
     CXX = "cxx"
     FORTRAN = "fortran"
+
+
+class FeatureType(str, Enum):
+    OPENMP = "OPENMP"
+    MPI = "MPI"
+    CUDA = "CUDA"
+    ONEAPI = "ONEAPI"
+    ROCM = "ROCM"
+    SYCL = "SYCL"
+    ROCFFT = "ROCFFT"
+    FFTW3 = "FFTW3"
+    ICPX = "ICPX"
+
+
+class FeatureSelectionType(Enum):
+    VECTORIZATION = "VECTORIZATION"
 
 
 class ArgumentsVariableEntryType(Enum):
@@ -249,28 +276,48 @@ class DockerLayer(BaseXaasConfigModel):
     builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
 
-    def _subst_string(self, version: str, val: str) -> str:
-        return val.replace(f"${{{self.version_arg}}}", version)
+    def _prepare_copy_steps(self, variable_mapping: dict[str, str], steps: list[DockerLayerCopyStep]) -> list[DockerLayerCopyStep]:
+        return [dataclasses.replace(
+            step,
+            image_tag=_variable_expand(step.image_tag, variable_mapping),
+            src_path=_variable_expand(step.src_path, variable_mapping),
+            dst_path=_variable_expand(step.dst_path, variable_mapping),
+        ) for step in steps]
 
-    def _prepare_copy_step(self, version: str, step: DockerLayerCopyStep) -> DockerLayerCopyStep:
-        return DockerLayerCopyStep(
-            image_tag=self._subst_string(version, step.image_tag),
-            src_path=self._subst_string(version, step.src_path),
-            dst_path=self._subst_string(version, step.dst_path),
-        )
+    def _prepare_variable_entries(self, variable_mapping: dict[str, str], entries: dict[str, ArgumentsVariableEntry]) -> dict[str, ArgumentsVariableEntry]:
+        return {name: dataclasses.replace(
+            entry,
+            value=_variable_expand(entry.value, variable_mapping),
+        ) for name, entry in entries.items()}
 
-    def prepare(self, name: str, version: str, arg_mapping: dict[str, str] | None) -> DockerLayerPrepared:
-        # TODO: jrabil: use arg_mapping in some way
-        # TODO: jrabil: implement fallback when arg_mapping is None
+    def prepare(
+            self, name: str, version: str, arg_mapping: dict[str, str] | None,
+            variable_ctx: dict[str, str],
+            states_boolean: dict[FeatureType, bool], states_select: dict[str, str]
+    ) -> DockerLayerPrepared:
+        variable_mapping = variable_ctx | (arg_mapping or {}) | {self.version_arg: version}
+
+        # insert variable mappings for all the items in self.arg_mappings
+        for arg, value in (self.arg_mapping or {}).items():
+            mapped_arg = arg_mapping[arg] if arg_mapping is not None else arg
+            variable_mapping[value.flag_name] = states_select[mapped_arg]
+
+        all_paths_prepared = self._prepare_copy_steps(variable_mapping, self.all_paths)
+        builder_paths_prepared = self._prepare_copy_steps(variable_mapping, self.builder_paths)
+        runtime_paths_prepared = self._prepare_copy_steps(variable_mapping, self.runtime_paths)
+
+        all_env_prepared = self._prepare_variable_entries(variable_mapping, self.all_env)
+        builder_env_prepared = self._prepare_variable_entries(variable_mapping, self.builder_env)
+        runtime_env_prepared = self._prepare_variable_entries(variable_mapping, self.runtime_env)
 
         return DockerLayerPrepared(
             name=name,
 
-            builder_paths=[ self._prepare_copy_step(version, step) for step in self.all_paths + self.builder_paths ],
-            runtime_paths=[ self._prepare_copy_step(version, step) for step in self.all_paths + self.runtime_paths ],
+            builder_paths=all_paths_prepared + builder_paths_prepared,
+            runtime_paths=all_paths_prepared + runtime_paths_prepared,
 
-            builder_env=union_merge(self.all_env, self.builder_env, ArgumentsVariableEntry.merge),
-            runtime_env=union_merge(self.all_env, self.runtime_env, ArgumentsVariableEntry.merge),
+            builder_env=union_merge(all_env_prepared, builder_env_prepared, ArgumentsVariableEntry.merge),
+            runtime_env=union_merge(all_env_prepared, runtime_env_prepared, ArgumentsVariableEntry.merge),
         )
 
 
@@ -307,6 +354,7 @@ class XaaSConfig:
 
     def __init__(self):
         self._initialized: bool
+        self.config_vars: dict[str, str]
         self.ir_type: IRType
         self.default_builder_image: str
         self.default_runtime_image: str
@@ -323,9 +371,10 @@ class XaaSConfig:
         with open(config_path) as f:
             config_data = yaml.safe_load(f)
 
+        self.config_vars = config_data["config_vars"]
         self.parallelism_level = config_data["parallelism_level"]
-        self.default_builder_image = config_data["default_builder_image"]
-        self.default_runtime_image = config_data["default_runtime_image"]
+        self.default_builder_image = _variable_expand(config_data["default_builder_image"], self.config_vars)
+        self.default_runtime_image = _variable_expand(config_data["default_runtime_image"], self.config_vars)
 
         match config_data["ir_type"]:
             case IRType.LLVM_IR.value:
@@ -348,7 +397,10 @@ class LayerDepBase(BaseXaasConfigModel):
         d['type'] = self.type
         return d
 
-    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
+    def prepare(
+            self, cpu_architecture: CPUArchitecture,
+            states_boolean: dict[FeatureType, bool], states_select: dict[str, str]
+    ) -> DockerLayerPrepared:
         raise NotImplementedError
 
 
@@ -360,8 +412,14 @@ class LayerDepReference(LayerDepBase):
     version: str
     arg_mapping: dict[str, str] | None = None
 
-    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
-        return XaaSConfig().layers.layers[cpu_architecture][self.name].prepare(self.name, self.version, self.arg_mapping)
+    def prepare(
+            self, cpu_architecture: CPUArchitecture,
+            states_boolean: dict[FeatureType, bool], states_select: dict[str, str]
+    ) -> DockerLayerPrepared:
+        return XaaSConfig().layers.layers[cpu_architecture][self.name].prepare(
+            self.name, self.version, self.arg_mapping,
+            XaaSConfig().config_vars,
+            states_boolean, states_select)
 
 
 @dataclass
@@ -379,32 +437,19 @@ class LayerDepCustom(LayerDepBase):
     builder_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
     runtime_env: dict[str, ArgumentsVariableEntry] = field(default_factory=dict)
 
-    def prepare(self, cpu_architecture: CPUArchitecture) -> DockerLayerPrepared:
+    def prepare(
+            self, cpu_architecture: CPUArchitecture,
+            states_boolean: dict[FeatureType, bool], states_select: dict[str, str]
+    ) -> DockerLayerPrepared:
         return DockerLayerPrepared(
-            name = self.name,
+            name=self.name,
 
-            builder_paths = self.all_paths + self.builder_paths,
-            runtime_paths = self.all_paths + self.runtime_paths,
+            builder_paths=self.all_paths + self.builder_paths,
+            runtime_paths=self.all_paths + self.runtime_paths,
 
-            builder_env = union_merge(self.all_env, self.builder_env, ArgumentsVariableEntry.merge),
-            runtime_env = union_merge(self.all_env, self.runtime_env, ArgumentsVariableEntry.merge),
+            builder_env=union_merge(self.all_env, self.builder_env, ArgumentsVariableEntry.merge),
+            runtime_env=union_merge(self.all_env, self.runtime_env, ArgumentsVariableEntry.merge),
         )
-
-
-class FeatureType(str, Enum):
-    OPENMP = "OPENMP"
-    MPI = "MPI"
-    CUDA = "CUDA"
-    ONEAPI = "ONEAPI"
-    ROCM = "ROCM"
-    SYCL = "SYCL"
-    ROCFFT = "ROCFFT"
-    FFTW3 = "FFTW3"
-    ICPX = "ICPX"
-
-
-class FeatureSelectionType(Enum):
-    VECTORIZATION = "VECTORIZATION"
 
 
 @dataclass
@@ -582,6 +627,7 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
                 from_context=path.image_tag,
                 src=path.src_path,
                 dst=path.dst_path,
+                link=True
             ))
 
         return DockerfileStage(from_context=self.base_image, steps=steps)
