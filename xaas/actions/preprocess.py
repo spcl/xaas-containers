@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import cast, Annotated
+from typing import cast
 from collections import defaultdict, namedtuple
 from itertools import islice
-from enum import Enum
 from hashlib import md5
 from pathlib import Path
 from mmap import ACCESS_READ, mmap
@@ -13,8 +12,6 @@ from dataclasses import dataclass, field
 
 import tqdm
 from docker.models.containers import Container
-from mashumaro.mixins.yaml import DataClassYAMLMixin
-from mashumaro.types import Discriminator
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
@@ -28,23 +25,21 @@ from xaas.actions.analyze import (
     SourceFileStatus,
     ProjectDivergence,
 )
+from xaas.config import BaseXaasConfigModel
 from xaas.docker import VolumeMount
 
 from concurrent.futures import ThreadPoolExecutor, as_completed, process
 
 
 @dataclass
-class IRFileStatus(DataClassYAMLMixin):
+class IRFileStatus(BaseXaasConfigModel):
     has_omp: bool = False
     file: str | None = None
 
 
 @dataclass
-class FileStatus(DataClassYAMLMixin):
-    command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+class FileStatus(BaseXaasConfigModel):
+    command: CompileCommand
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
@@ -54,12 +49,9 @@ class FileStatus(DataClassYAMLMixin):
 
 
 @dataclass
-class ProcessedResults(DataClassYAMLMixin):
+class ProcessedResults(BaseXaasConfigModel):
     baseline_project: str
-    baseline_command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+    baseline_command: CompileCommand
     # Mapping: hash -> list of [(config, path)]
     # We use to decide when two file with the same hash are compatible with each other
     ir_files: dict[str, list[tuple[ProjectDivergence, IRFileStatus]]] = field(default_factory=dict)
@@ -67,7 +59,7 @@ class ProcessedResults(DataClassYAMLMixin):
 
 
 @dataclass
-class PreprocessingResult(DataClassYAMLMixin):
+class PreprocessingResult(BaseXaasConfigModel):
     build: BuildConfig = field(default_factory=BuildConfig)
     targets: dict[str, ProcessedResults] = field(default_factory=dict)
 

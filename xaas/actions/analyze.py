@@ -4,20 +4,16 @@ import json
 import logging
 import os
 import re
-import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
-from typing import Annotated
 
-from mashumaro.mixins.yaml import DataClassYAMLMixin
 from mashumaro.types import Discriminator
-from mashumaro.config import BaseConfig
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
-from xaas.config import TargetTriple
+from xaas.config import TargetTriple, BaseXaasConfigModel
 
 
 class Compiler(str, Enum):
@@ -41,7 +37,10 @@ class DivergenceReason(Enum):
 
 
 @dataclass
-class CompileCommand(DataClassYAMLMixin):
+class CompileCommand(BaseXaasConfigModel):
+    class Config(BaseXaasConfigModel.Config):
+        discriminator = Discriminator(field="compiler_type", include_subtypes=True)
+
     source: str
     build_dir: str
     compiler: str
@@ -71,8 +70,8 @@ class NVCCCompileCommand(CompileCommand):
 
 
 @dataclass
-class ProjectDivergence(DataClassYAMLMixin):
-    class Config(BaseConfig):
+class ProjectDivergence(BaseXaasConfigModel):
+    class Config(BaseXaasConfigModel.Config):
         serialization_strategy = {
             set[str] | str: {
                 "deserialize": lambda x: x if isinstance(x, str) else set(x),
@@ -84,14 +83,11 @@ class ProjectDivergence(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceFileStatus(DataClassYAMLMixin):
+class SourceFileStatus(BaseXaasConfigModel):
     """Status of a source file across all projects."""
 
     default_build: str
-    default_command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+    default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
 
@@ -99,21 +95,15 @@ class SourceFileStatus(DataClassYAMLMixin):
 
 
 @dataclass
-class ProjectResult(DataClassYAMLMixin):
+class ProjectResult(BaseXaasConfigModel):
     """Results from analyzing a single project build."""
 
     # Target file -> compile command
-    files: dict[
-        str,
-        Annotated[
-            CompileCommand,
-            Discriminator(field="compiler_type", include_subtypes=True),
-        ],
-    ] = field(default_factory=dict)
+    files: dict[str, CompileCommand] = field(default_factory=dict)
 
 
 @dataclass
-class BuildComparison(DataClassYAMLMixin):
+class BuildComparison(BaseXaasConfigModel):
     """Comparison of builds across all projects."""
 
     source_files: dict[str, SourceFileStatus] = field(
@@ -125,7 +115,7 @@ class BuildComparison(DataClassYAMLMixin):
 
 
 @dataclass
-class Config(DataClassYAMLMixin):
+class Config(BaseXaasConfigModel):
     build: BuildConfig = field(default_factory=BuildConfig)
     build_comparison: BuildComparison = field(default_factory=BuildComparison)
 
