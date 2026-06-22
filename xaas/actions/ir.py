@@ -496,7 +496,10 @@ class CUDA:
         ir_cmd = CUDA.remove_all_gencode_options(ir_cmd)
 
         # Add our standardized gencode options
-        standardized_gencodes = CUDA.generate_standardized_gencode_options()
+        #standardized_gencodes = CUDA.generate_standardized_gencode_options()
+        #standardized_gencodes = CUDA.generate_config_based_gencode_options(cmd)
+        standardized_gencodes = CUDA.generate_all_gencode_options()
+
         ir_cmd = f"{ir_cmd} {' '.join(standardized_gencodes)}"
         logging.debug(f"Added standardized CUDA gencode options: {len(standardized_gencodes)}")
 
@@ -564,3 +567,28 @@ class CUDA:
             )
 
         return gencode_options
+
+    @staticmethod
+    def generate_config_based_gencode_options(cmd: NVCCCompileCommand) -> list[str]:
+        """
+        Generate our standardized set of gencode options for all configured architectures.
+        This is intended to replace any existing gencode options with our set.
+        """
+        gencode_options = []
+
+        # Add SASS targets for all requested architectures
+        gencode_options.extend(f"-gencode=arch=compute_{arch},code=sm_{arch}" for arch in cmd.gencode_sass)
+
+        # Add PTX targets for all requested architectures
+        gencode_options.extend(f"-gencode=arch=compute_{version},code=compute_{version}" for version in cmd.gencode_ptx)
+
+        return gencode_options
+
+    @staticmethod
+    def generate_all_gencode_options() -> list[str]:
+        """
+        Generate our standardized set of gencode options for all supported architectures.
+        This is intended to replace any existing gencode options with our set.
+        """
+
+        return ["--gpu-architecture=all"]
