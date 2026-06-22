@@ -139,7 +139,7 @@ class DockerImageBuilder(Action):
         # (1) We run the custom opt pass to replace targets
         # (2) We run optimizations (together with the previous one)
         # FIXME: hardcoding
-        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/feature-analyzer/libReplaceTargetFeatures.so "
+        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/llvm-features/libReplaceTargetFeatures.so "
         cmd += '-passes="replace-target-features" '
 
         if project.cpu_tuning:

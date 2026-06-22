@@ -272,7 +272,7 @@ class CPUTuning(Action):
         get_features_cmd = [
             "opt-19",
             "-load-pass-plugin",
-            "/tools/feature-analyzer/libReplaceTargetFeatures.so",
+            "/tools/llvm-features/libReplaceTargetFeatures.so",
             '-passes="replace-target-features"',
             "-query-features=true",
             ir_file,
