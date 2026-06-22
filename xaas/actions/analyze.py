@@ -266,8 +266,8 @@ class BuildAnalyzer(Action):
 
         if cmd1.target_triple is not cmd2.target_triple:
             differences[DivergenceReason.TARGET_TRIPLE] = {
-                "added": cmd2.target_triple,
-                "removed": cmd1.target_triple,
+                "added": cmd2.target_triple.value if cmd2.target_triple is not None else "",
+                "removed": cmd1.target_triple.value if cmd1.target_triple is not None else "",
             }
 
         flags_diff1 = cmd2.flags - cmd1.flags
@@ -285,17 +285,17 @@ class BuildAnalyzer(Action):
         # FIXME: added/removed is not the best match here
         # if we point to different build directories,
         # these could include different configs!
-        added = []
+        added = set()
         for incl in [*cmd1.includes, *cmd2.includes]:
             if "/build" in incl:
-                added.append(incl)
+                added.add(incl)
         if len(added) > 0:
             if DivergenceReason.INCLUDES in differences:
                 differences[DivergenceReason.INCLUDES]["added"].update(added)
             else:
                 differences[DivergenceReason.INCLUDES] = {
                     "added": added,
-                    "removed": [],
+                    "removed": set(),
                 }
 
         defines_diff1 = cmd2.definitions - cmd1.definitions
