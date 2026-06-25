@@ -19,6 +19,12 @@ def _command_shell_or_exec_form_to_dockerfile(command: str | list[str]) -> str:
 
 
 class DockerfileStep:
+    def required_docker_buildkit(self) -> bool:
+        return False
+
+    def required_dockerfile_syntax(self) -> str:
+        return "1"
+
     def to_dockerfile_line(self) -> str:
         raise NotImplementedError
 
@@ -38,17 +44,21 @@ class CmdStep(DockerfileStep):
 class CopyStep(DockerfileStep):
     NAME: ClassVar[str] = "COPY"
 
-    src: str | list[str]
-    dst: str
+    source: str | list[str]
+    target: str
     from_context: str | None = None
     link: bool = False
 
+    def required_dockerfile_syntax(self) -> str:
+        # ADD/COPY --link was added in 1.4
+        return "1.4" if self.link else super().required_dockerfile_syntax()
+
     def to_dockerfile_line(self) -> str:
         paths: list[str]
-        if isinstance(self.src, str):
-            paths = [ self.src, self.dst ]
+        if isinstance(self.source, str):
+            paths = [self.source, self.target]
         else:
-            paths = [ *self.src, self.dst ]
+            paths = [*self.source, self.target]
 
         return f"{self.NAME} {"--link" if self.link else ""} {f"--from={self.from_context}" if self.from_context else ""} {_to_dockerfile_quoted_list(paths)}"
 
@@ -72,7 +82,7 @@ class EnvStep(DockerfileStep):
     vars: dict[str, str]
 
     def to_dockerfile_line(self) -> str:
-        return f"{self.NAME} {" ".join([ f"{k}={v}" for k, v in self.vars.items() ])}"
+        return f"{self.NAME} {" \\\n    ".join([ f"{k}={v}" for k, v in self.vars.items() ])}"
 
 
 @dataclass
@@ -111,7 +121,7 @@ class RunStep(DockerfileStep):
             opts.append(f"target={shlex.quote(self.target)}")
             if self.rw:
                 opts.append("rw")
-            return f"--mount,type={self.TYPE},{",".join(opts)}"
+            return f"--mount=type={self.TYPE},{",".join(opts)}"
 
 
     @dataclass
@@ -143,7 +153,7 @@ class RunStep(DockerfileStep):
             opts.append(f"sharing={self.sharing.value}")
             if self.ro:
                 opts.append("ro")
-            return f"--mount,type={self.TYPE},{",".join(opts)}"
+            return f"--mount=type={self.TYPE},{",".join(opts)}"
 
 
     @dataclass
@@ -153,16 +163,24 @@ class RunStep(DockerfileStep):
         target: str
 
         def to_dockerfile_run_option(self) -> str:
-            return f"--mount,type={self.TYPE},target={shlex.quote(self.target)}"
+            return f"--mount=type={self.TYPE},target={shlex.quote(self.target)}"
 
 
     # shell form if str, exec form if list[str]
     command: str | list[str]
     mounts: list[Mount] | None = None
 
+    def required_docker_buildkit(self) -> bool:
+        # RUN --mount requires BuildKit!
+        return bool(self.mounts) or super().required_docker_buildkit()
+
+    def required_dockerfile_syntax(self) -> str:
+        # RUN --mount was added in 1.4
+        return "1.2" if self.mounts else super().required_dockerfile_syntax()
+
     def to_dockerfile_line(self) -> str:
-        mounts = [ mount.to_dockerfile_run_option() for mount in (self.mounts or []) ]
-        return f"{self.NAME} {" ".join(mounts)} {_command_shell_or_exec_form_to_dockerfile(self.command)}"
+        mounts = [ f"{mount.to_dockerfile_run_option()} \\\n    " for mount in (self.mounts or []) ]
+        return f"{self.NAME} {"".join(mounts)}{_command_shell_or_exec_form_to_dockerfile(self.command)}"
 
     def get_command_in_shell_form(self) -> str:
         if isinstance(self.command, str):
@@ -176,10 +194,16 @@ class DockerfileStage:
     from_context: str
     steps: list[DockerfileStep]
 
-    def to_dockerfile_lines(self, name: str) -> list[str]:
+    def required_docker_buildkit(self) -> bool:
+        return any(step.required_docker_buildkit() for step in self.steps)
+
+    def required_dockerfile_syntax(self) -> str:
+        return max((step.required_dockerfile_syntax() for step in self.steps), key=float)
+
+    def to_dockerfile_lines(self, name: str | None) -> list[str]:
         return [
-            f"FROM {self.from_context} AS {name}",
-            *[ step.to_dockerfile_line() for step in self.steps ],
+            f"FROM {self.from_context} AS {name}" if name else f"FROM {self.from_context}",
+            *( step.to_dockerfile_line() for step in self.steps ),
             "",
         ]
 
@@ -187,9 +211,14 @@ class DockerfileStage:
 @dataclass
 class Dockerfile:
     stages: list[tuple[str | None, DockerfileStage]]
-    syntax: str | None = None
 
-    def to_dockerfile_lines(self) -> list[str]:
+    def required_docker_buildkit(self) -> bool:
+        return any(stage.required_docker_buildkit() for _, stage in self.stages)
+
+    def required_dockerfile_syntax(self) -> str:
+        return max((stage.required_dockerfile_syntax() for _, stage in self.stages), key=float)
+
+    def to_lines(self) -> list[str]:
         """
         Converts this :py:class:`~Dockerfile` to a list of lines which can be written out to an actual dockerfile on disk.
 
@@ -197,10 +226,19 @@ class Dockerfile:
         """
 
         return [
-            f"# syntax=docker/dockerfile:{self.syntax or "1"}",
+            f"# syntax=docker/dockerfile:{self.required_dockerfile_syntax()}",
             "",
-            *itertools.chain.from_iterable([ stage.to_dockerfile_lines(name) for name, stage in self.stages ]),
+            *itertools.chain.from_iterable(stage.to_dockerfile_lines(name) for name, stage in self.stages),
         ]
+
+    def to_str(self) -> str:
+        """
+        Converts this :py:class:`~Dockerfile` to a single :py:class:`str` which can be written out to an actual dockerfile on disk.
+
+        :return: the dockerfile content
+        """
+
+        return "\n".join(self.to_lines())
 
 
 class DockerfileBuilder:
@@ -225,6 +263,8 @@ class DockerfileBuilder:
                 i = i + 1
             name = f"stage_{i}"
 
+        assert name, f"invalid stage name: '{name}'"
+
         if name in self.stages:
             raise RuntimeError(f"dockerfile already contains a stage named '{name}' ({self.stages.keys()})")
 
@@ -244,6 +284,6 @@ class DockerfileBuilder:
 
         return Dockerfile(
             stages=[
-                *list(self.stages.items()),
+                *self.stages.items(),
                 ( None, terminal_stage ),
             ])

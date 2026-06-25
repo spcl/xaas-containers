@@ -625,8 +625,8 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
         for path in (self.paths or []):
             steps.append(CopyStep(
                 from_context=path.image_tag,
-                src=path.src_path,
-                dst=path.dst_path,
+                source=path.src_path,
+                target=path.dst_path,
                 link=True
             ))
 
@@ -660,7 +660,7 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
                 target=path.dst_path,
             ) for path in self.paths ]
 
-            inline_run_step = dataclasses.replace(inline_run_step, mounts=bind_mounts + inline_run_step.mounts)
+            inline_run_step = dataclasses.replace(inline_run_step, mounts=bind_mounts + (inline_run_step.mounts or []))
 
         if inline_run_step is not None and self.env:
             # prepend the command with some shell code which exports the updated environment variables
@@ -704,11 +704,11 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
 
         os.makedirs(empty_dir_path, exist_ok=True)
 
-        dockerfile_lines = DockerfileBuilder().build(self.prepared_dockerfile_stage()).to_dockerfile_lines()
+        dockerfile_lines = DockerfileBuilder().build(self.prepared_dockerfile_stage()).to_lines()
 
         return docker_runner.build(
             path=empty_dir_path,
-            dockerfile_lines=dockerfile_lines,
+            dockerfile_content=dockerfile_lines,
             tag=None,
         ).id
 
@@ -734,12 +734,8 @@ class DeployConfig(BaseXaasConfigModel):
     working_directory: str
     cpu_architecture: CPUArchitecture
     features_boolean: dict[FeatureType, bool]
-    features_versions: dict[FeatureType, str]
     features_select: dict[str, str]
     docker_repository: str
-    # FIXME: hide this config in image config
-    # should be selected by features automatically
-    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict)
 
     @staticmethod
     def load(config_path: str) -> DeployConfig:

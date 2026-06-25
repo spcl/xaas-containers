@@ -52,7 +52,10 @@ class DockerImageBuilder(Action):
 
         logging.info(f"[{self.name}] Building Docker image: {image_name}, in {build_dir}")
 
-        self.docker_runner.build(dockerfile="Dockerfile", path=build_dir, tag=image_name)
+        self.docker_runner.build(
+            dockerfile="Dockerfile", path=build_dir, tag=image_name,
+            labels={'xaas.BuildConfig': config.build.to_yaml()}
+        )
 
         logging.info(f"[{self.name}] Successfully built Docker image {image_name}")
 
