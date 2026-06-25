@@ -153,8 +153,6 @@ class ClangPreprocesser(Action):
         Container = namedtuple("Container", ["container", "working_dir"])  # noqa: F821
         containers = {}
 
-        empty_dir_path = os.path.join(os.path.realpath(config.build.working_directory), "empty_dir")
-
         new_results = PreprocessingResult(build=config.build)
 
         try:
@@ -175,7 +173,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner, empty_dir_path),
+                        image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner),
                         mounts=volumes,
                         remove=True,
                         detach=True,

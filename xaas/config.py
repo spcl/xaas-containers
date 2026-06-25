@@ -688,7 +688,7 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
             steps=[ orig_run_step ],
         )
 
-    def build_prepared_image(self, docker_runner: DockerRunner, empty_dir_path: str) -> str:
+    def build_prepared_image(self, docker_runner: DockerRunner) -> str:
         """
         Gets the tag of a Docker image fully configured according to this descriptor. This may cause the image to be
         built if necessary.
@@ -702,12 +702,10 @@ class DerivedDockerImageDescriptor(BaseXaasConfigModel):
             # the derived image is exactly the same as the base
             return self.base_image
 
-        os.makedirs(empty_dir_path, exist_ok=True)
-
         dockerfile_lines = DockerfileBuilder().build(self.prepared_dockerfile_stage()).to_lines()
 
         return docker_runner.build(
-            path=empty_dir_path,
+            path=None,
             dockerfile_content=dockerfile_lines,
             tag=None,
         ).id

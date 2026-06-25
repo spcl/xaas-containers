@@ -135,8 +135,6 @@ class IRCompiler(Action):
         ir_dir = os.path.realpath(os.path.join(config.build.working_directory, self.IR_PATH))
         os.makedirs(ir_dir, exist_ok=True)
 
-        empty_dir_path = os.path.join(os.path.realpath(config.build.working_directory), "empty_dir")
-
         for build in config.build.build_results:
             if (
                 self.conditional_build
@@ -162,7 +160,7 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner, empty_dir_path),
+                image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner),
                 mounts=volumes,
                 remove=False,
                 detach=True,

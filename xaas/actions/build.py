@@ -143,8 +143,6 @@ class BuildGenerator(Action):
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
-        empty_dir_path = os.path.join(working_dir, "empty_dir")
-
         #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid messing up the indentation
         if True:
             # TODO: jrabil: automatically build for multiple configurations
@@ -168,7 +166,7 @@ class BuildGenerator(Action):
 
                 builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
 
-                prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner, empty_dir_path)
+                prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner)
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
