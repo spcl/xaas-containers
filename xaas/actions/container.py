@@ -11,7 +11,8 @@ from xaas.actions.analyze import DivergenceReason, CompileCommand, Compiler, NVC
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.ir import PreprocessingResult
 from xaas.actions.preprocess import FileStatus
-from xaas.config import XaaSConfig
+from xaas.docker import DockerBuildFeatures
+from xaas.util.dockerfile import DockerfileBuilder, DockerfileStage, CopyStep
 
 
 class DockerImageBuilder(Action):
@@ -35,6 +36,8 @@ class DockerImageBuilder(Action):
 
         build_dir = os.path.join(config.build.working_directory, os.path.pardir)
 
+        docker_builder = self.docker_runner.try_get_buildkit_builder() or self.docker_runner
+
         for build in config.build.build_results:
             file_path = os.path.join(build.directory, "build.sh")
             with open(file_path, "w") as f:
@@ -44,7 +47,7 @@ class DockerImageBuilder(Action):
             logging.info(f"[{self.name}] Created build script in {file_path}")
 
         dockerfile_path = os.path.join(build_dir, "Dockerfile")
-        dockerfile_content = self._generate_dockerfile(build_dir, config)
+        dockerfile_content = self._generate_dockerfile(build_dir, config, docker_builder.get_build_features())
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
@@ -52,9 +55,10 @@ class DockerImageBuilder(Action):
 
         logging.info(f"[{self.name}] Building Docker image: {image_name}, in {build_dir}")
 
-        self.docker_runner.build(
+        docker_builder.build(
             dockerfile="Dockerfile", path=build_dir, tag=image_name,
-            labels={'xaas.BuildConfig': config.build.to_yaml()}
+            labels={'xaas.BuildConfig': config.build.to_yaml()},
+            show_progress=True,
         )
 
         logging.info(f"[{self.name}] Successfully built Docker image {image_name}")
@@ -166,48 +170,30 @@ class DockerImageBuilder(Action):
         return cmd
 
     def _generate_dockerfile(
-        self, build_dir: str, config: PreprocessingResult
+        self, build_dir: str, config: PreprocessingResult, build_features: DockerBuildFeatures,
     ) -> str:
-        lines = []
+        dockerfile_builder = DockerfileBuilder()
 
-        lines.extend(
-            [
-                f"FROM {self.BASE_IMAGE}",
-                "",
+        terminal_stage = DockerfileStage(
+            from_context="scratch",
+            steps=[
+                CopyStep(
+                    source=os.path.relpath(config.build.source_directory, build_dir),
+                    target="/source",
+                ),
+                CopyStep(
+                    source=os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir),
+                    target="/irs",
+                ),
+                *[CopyStep(
+                    source=os.path.relpath(build.directory, build_dir),
+                    target=f"/builds/{Path(build.directory).name}",
+                ) for i, build in enumerate(config.build.build_results)],
             ]
         )
 
-        for i, build in enumerate(config.build.build_results):
-            build_path = os.path.relpath(build.directory, build_dir)
-            build_name = Path(build.directory).name
-
-            lines.append(f"# Build {i + 1}: {build_name}")
-            lines.append(f"COPY {build_path} /builds/{build_name}")
-
-        """
-            Necessary for the build to finish.
-        """
-        source_path = os.path.relpath(config.build.source_directory, build_dir)
-        lines.append("")
-        lines.append("# Add source code")
-        lines.append(f"COPY {source_path} /source")
-
-        source_path = os.path.relpath(config.build.source_directory)
-        lines.append("")
-        lines.append("# Add IR files")
-        lines.append(
-            f"COPY {os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir)} /irs"
-        )
-
-        lines.append("")
-        lines.append("# Set environment variables")
-        lines.append(f"ENV PROJECT_NAME={config.build.project_name}")
-
-        lines.append("")
-        lines.append("# Default command")
-        lines.append('CMD ["bash"]')
-
-        return "\n".join(lines)
+        dockerfile = dockerfile_builder.build(terminal_stage)
+        return dockerfile.to_str()
 
     def validate(self, config: PreprocessingResult) -> bool:
         work_dir = config.build.working_directory

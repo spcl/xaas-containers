@@ -94,11 +94,13 @@ class BuildxDispatcher(BuildInterface):
 
         cmdline_args = [self.executable_path, "buildx", "build"]
 
-        for k, v in build_args or {}:
-            cmdline_args.append(f"--build-arg={k}={v}")
+        if build_args:
+            for k, v in build_args.items():
+                cmdline_args.append(f"--build-arg={k}={v}")
 
-        for k, v in labels or {}:
-            cmdline_args.append(f"--label={k}={v}")
+        if labels:
+            for k, v in labels.items():
+                cmdline_args.append(f"--label={k}={v}")
 
         if platform:
             cmdline_args.append(f"--platform={platform}")
