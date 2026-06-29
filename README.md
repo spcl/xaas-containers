@@ -16,19 +16,19 @@ If you use XaaS containers in your research, please cite our SC '25 paper:
 
 ```bibtex
 @inproceedings{10.1145/3712285.3759868,
-author = {Copik, Marcin and Alnuaimi, Eiman and Kamatar, Alok and Hayot-Sasson, Valerie and Madonna, Alberto and Gamblin, Todd and Chard, Kyle and Foster, Ian and Hoefler, Torsten},
-title = {XaaS Containers: Performance-Portable Representation With Source and IR Containers},
-year = {2025},
-isbn = {9798400714665},
-publisher = {Association for Computing Machinery},
-address = {New York, NY, USA},
-url = {https://doi.org/10.1145/3712285.3759868},
-doi = {10.1145/3712285.3759868},
-booktitle = {Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis},
-pages = {533–555},
-numpages = {23},
-keywords = {Containers, Intermediate Representation, Performance Portability},
-series = {SC '25}
+  author = {Copik, Marcin and Alnuaimi, Eiman and Kamatar, Alok and Hayot-Sasson, Valerie and Madonna, Alberto and Gamblin, Todd and Chard, Kyle and Foster, Ian and Hoefler, Torsten},
+  title = {XaaS Containers: Performance-Portable Representation With Source and IR Containers},
+  year = {2025},
+  isbn = {9798400714665},
+  publisher = {Association for Computing Machinery},
+  address = {New York, NY, USA},
+  url = {https://doi.org/10.1145/3712285.3759868},
+  doi = {10.1145/3712285.3759868},
+  booktitle = {Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis},
+  pages = {533–555},
+  numpages = {23},
+  keywords = {Containers, Intermediate Representation, Performance Portability},
+  series = {SC '25}
 }
 ```
 
