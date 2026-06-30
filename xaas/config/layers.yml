@@ -33,8 +33,7 @@ layers:
       versions: ['3.3.10']
       version_arg: FFTW3_VERSION
       all_paths:
-          # TODO: jrabil: upgrade this image
-        - image_tag: docker.io/spcleth/xaas:deps-fftw3-${FFTW3_VERSION}-${SIMD_FLAG}
+        - image_tag: docker.io/spcleth/xaas:${XAAS_SYSTEM_VERSION}-layer-fftw${FFTW3_VERSION}-${SIMD_FLAG}
           src_path: /opt/fftw3
           dst_path: /opt/fftw3
       all_env:

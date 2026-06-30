@@ -58,3 +58,23 @@ for ONEAPI_VERSION in "2025.0"; do
       --tag="${XAAS_IMAGE_PREFIX}layer-oneapi${ONEAPI_VERSION}" \
       --file="layers/Dockerfile.oneapi" "$CONTEXT_PATH"
 done
+
+for FFTW3_VERSION in "3.3.10"; do
+  FFTW3_TARGETS=(
+    "SSE2,--enable-sse2"
+    "SSE4.1,--enable-sse2"
+    "AVX_256,--enable-sse2 --enable-avx --enable-avx2"
+    "AVX2_128,--enable-sse2 --enable-avx --enable-avx2"
+    "AVX2_256,--enable-sse2 --enable-avx --enable-avx2"
+    "AVX_512,--enable-sse2 --enable-avx --enable-avx2 --enable-avx512"
+  )
+  for target in "${FFTW3_TARGETS[@]}"; do
+    IFS=',' read FFTW3_SIMD_TAG FFTW3_SIMD_BUILD_ARGS <<< "${target}"
+
+    "$DOCKER_COMMAND" build "${BUILD_ARGS[@]}" \
+        --build-arg=FFTW3_VERSION="${FFTW3_VERSION}" \
+        --build-arg=FFTW3_SIMD_BUILD_ARGS="${FFTW3_SIMD_BUILD_ARGS}" \
+        --tag="${XAAS_IMAGE_PREFIX}layer-fftw${FFTW3_VERSION}-${FFTW3_SIMD_TAG}" \
+        --file="layers/Dockerfile.fftw3" "$CONTEXT_PATH"
+  done
+done
