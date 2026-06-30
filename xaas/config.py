@@ -249,11 +249,11 @@ class DockerLayerPrepared(BaseXaasConfigModel):
     runtime_env: dict[str, ArgumentsVariableEntry]
 
 
-# TODO: jrabil: rename this to DockerLayerTemplate or MultiVersionDockerLayer or something
 # TODO: jrabil: get rid of the many unnecessary fields here
-# TODO: jrabil: maybe turn the 'version' into an ordinary build argument
+#   (they're still here for now because they're used by the source container stuff, we should probably rewrite that to use the new dockerfile generation infrastructure as IR containers)
+# TODO: jrabil: maybe turn the 'version' into an ordinary build argument?
 @dataclass
-class DockerLayer(BaseXaasConfigModel):
+class DockerLayerTemplate(BaseXaasConfigModel):
     """
     A full specification of the Docker layers (and other properties) for a dependency which may support multiple versions or other arguments.
     """
@@ -322,7 +322,7 @@ class DockerLayer(BaseXaasConfigModel):
 
 @dataclass
 class DockerLayers(BaseXaasConfigModel):
-    layers: dict[CPUArchitecture, dict[str, DockerLayer]]
+    layers: dict[CPUArchitecture, dict[str, DockerLayerTemplate]]
 
     @staticmethod
     def load(config_path: str) -> DockerLayers:
