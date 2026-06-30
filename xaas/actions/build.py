@@ -39,42 +39,6 @@ class BuildGenerator(Action):
     def __init__(self):
         super().__init__(name="build", description="Builds the project with specified features")
 
-    # TODO: jrabil: this is unused now, delete it once i finish porting over the variable expansion code
-    def _generate_docker_image(
-        self,
-        docker_image: str,
-        layers_deps: list[DockerLayerPrepared],
-        cpu_architecture: CPUArchitecture,
-        build_option: dict[str, str],
-    ) -> tuple[list[str], str]:
-        lines: list[str] = []
-        name_suffix: list[str] = []
-
-        lines.append(f"FROM {docker_image}")
-
-        for dependency in layers_deps:
-            # TODO: jrabil: perform variable substitution when preparing the dependency
-            # dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
-            # layer_tag = dep_cfg.image_tag.replace("${version}", dependency.version)
-            # for arg, value in dependency.arg_mapping.items():
-            #     if not dep_cfg.arg_mapping:
-            #         continue
-            #
-            #     if arg in dep_cfg.arg_mapping:
-            #         flag_name = dep_cfg.arg_mapping[arg].flag_name
-            #         flag_value = build_option[arg]
-            #
-            #         layer_tag = layer_tag.replace(f"${{{flag_name}}}", flag_value)
-            # # TODO: jrabil: we split the tag here and only use the version in the name suffix, but maybe this will result in aliasing?
-            # name_suffix.append(layer_tag.split(":", 1)[1])
-
-            name_suffix.append(dependency.name)
-
-            for path in dependency.builder_paths:
-                lines.append(f"COPY --link --from={path.image_tag} {path.src_path} {path.dst_path}")
-
-        return lines, "_".join(name_suffix)
-
     def execute(self, run_config: RunConfig) -> bool:
         logging.info(f"[{self.name}] Building project {run_config.project_name}")
         config_obj = Config.from_instance(run_config)

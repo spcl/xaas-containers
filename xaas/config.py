@@ -323,7 +323,6 @@ class DockerLayer(BaseXaasConfigModel):
 @dataclass
 class DockerLayers(BaseXaasConfigModel):
     layers: dict[CPUArchitecture, dict[str, DockerLayer]]
-    layers_deps: dict[CPUArchitecture, dict[str, DockerLayer]] | None = None # TODO: jrabil: remove this
 
     @staticmethod
     def load(config_path: str) -> DockerLayers:
@@ -483,13 +482,6 @@ class FeatureConfigBoolean(BaseXaasConfigModel):
         return self.enabled if state else self.disabled
 
 
-# TODO: jrabil: remove this
-@dataclass
-class LayerDepConfig(BaseXaasConfigModel):
-    version: str
-    arg_mapping: dict[str, str]
-
-
 @dataclass
 class PartialRunConfig(BaseXaasConfigModel):
     """
@@ -530,7 +522,6 @@ class RunConfig(DataClassYAMLMixin):
     all_targets: PartialRunConfig
     cpu_specific: dict[CPUArchitecture, PartialRunConfig]
     additional_steps: list[list[str]]
-    layers_deps: dict[str, LayerDepConfig] = field(default_factory=dict) # TODO: jrabil: remove this
 
     @classmethod
     def load(cls, config_path: str) -> RunConfig:
