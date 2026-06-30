@@ -198,7 +198,7 @@ class DockerfileStage:
         return any(step.required_docker_buildkit() for step in self.steps)
 
     def required_dockerfile_syntax(self) -> str:
-        return max((step.required_dockerfile_syntax() for step in self.steps), key=float)
+        return max((step.required_dockerfile_syntax() for step in self.steps), key=float, default="1")
 
     def to_dockerfile_lines(self, name: str | None) -> list[str]:
         return [
@@ -216,7 +216,7 @@ class Dockerfile:
         return any(stage.required_docker_buildkit() for _, stage in self.stages)
 
     def required_dockerfile_syntax(self) -> str:
-        return max((stage.required_dockerfile_syntax() for _, stage in self.stages), key=float)
+        return max((stage.required_dockerfile_syntax() for _, stage in self.stages), key=float, default="1")
 
     def to_lines(self) -> list[str]:
         """
