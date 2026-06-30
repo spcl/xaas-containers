@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
+ARG XAAS_IMAGE_PREFIX
+
+FROM ${XAAS_IMAGE_PREFIX}base-debian13 AS compiler-debian13-llvm19
+
+# Install basic stuff for compiling software
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    eatmydata apt-get update && eatmydata apt-get install -y \
+        # build-essential (includes GCC and some other stuff)
+        build-essential \
+        # LLVM C/C++/Fortran compilers, LLVM linker
+        clang-19 \
+        flang-19 \
+        lld-19 \
+        # Build tools
+        cmake \
+        make \
+        # For downloading and extracting source code
+        curl \
+        unzip \
+        tar \
+        # For adding additional apt repositories
+        apt-transport-https \
+        gpg-agent \
+    # Make clang be the default C/C++ compiler
+    && update-alternatives --install /usr/bin/cc cc /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-19 100 \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-19 100 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-19 100
+
+# Make flang be the default Fortran compiler
+ENV FC=/usr/bin/flang-new-19

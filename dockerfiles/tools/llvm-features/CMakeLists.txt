@@ -15,6 +15,4 @@ add_library(ReplaceTargetFeatures MODULE features-pass.cpp)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
 
-llvm_map_components_to_libnames(llvm_libs Core Passes Support)
-
-target_link_libraries(ReplaceTargetFeatures PRIVATE ${llvm_libs})
+llvm_config(ReplaceTargetFeatures USE_SHARED Core Passes Support)

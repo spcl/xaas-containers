@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.4
+# 1.2: RUN --mount
+# 1.4: COPY --link
+
+ARG XAAS_IMAGE_PREFIX
+ARG DEBIAN_VERSION
+ARG LLVM_VERSION
+
+# Inheriting from the compiler image so that we get gpg-agent, as well as the regular GCC toolchain (which is used by the oneapi package)
+FROM ${XAAS_IMAGE_PREFIX}compiler-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION} AS builder
+
+ARG ONEAPI_VERSION
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
+    curl -o - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null \
+    && echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" > /etc/apt/sources.list.d/oneAPI.list \
+    && eatmydata apt-get update && eatmydata apt-get install -y --no-install-recommends \
+        intel-oneapi-base-toolkit-${ONEAPI_VERSION}
+
+
+FROM scratch
+
+COPY --link --from=builder /opt/intel /opt/intel 

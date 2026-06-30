@@ -1,14 +1,42 @@
 working_directory: gromacs-builds
-source_directory: gromacs
+source_directory: gromacs-2026.0
 project_name: gromacs
 build_system: cmake
-features_select:
-  VECTORIZATION:
-    SSE4.1: GMX_SIMD=SSE4.1
-features_boolean:
-  MPI: [GMX_MPI=ON, GMX_MPI=OFF]
-  OPENMP: [GMX_OPENMP=ON, GMX_OPENMP=OFF]
-  CUDA: [GMX_GPU=CUDA, GMX_GPU=OFF]
-additional_args:
-  - GMX_BUILD_OWN_FFTW=ON
-  - CMAKE_CUDA_ARCHITECTURES=70
+cpu_architectures: [x86_64]
+all_targets:
+  features_select:
+    VECTORIZATION:
+        SSE4.1:
+          property:
+            GMX_SIMD: 'SSE4.1'
+        AVX2_256:
+          property:
+            GMX_SIMD: 'AVX2_256'
+  features_boolean:
+    CUDA:
+      enabled:
+        property:
+          GMX_GPU: 'CUDA'
+          CMAKE_CUDA_ARCHITECTURES: 'all-major'
+        dependencies:
+          - type: default
+            name: cuda
+            version: '13.1'
+      disabled:
+        property:
+          GMX_GPU: 'OFF'
+  build_args:
+    property:
+      GMX_OPENMP: 'ON'
+      GMX_MPI: 'OFF'
+      GMX_BUILD_OWN_FFTW: 'OFF'
+      FFTWF_INCLUDE_DIR: '/opt/fftw3/include'
+      FFTWF_LIBRARY: '/opt/fftw3/lib/libfftw3f.a'
+    dependencies:
+    - type: default
+      name: fftw3
+      version: '3.3.10'
+cpu_specific: {}
+additional_steps:
+- [make, -f, ./CMakeFiles/release-version-info.dir/build.make, CMakeFiles/release-version-info]
+- [make, -f, src/gromacs/CMakeFiles/libgromacs.dir/build.make, src/gromacs/CMakeFiles/libgromacs.dir/depend]

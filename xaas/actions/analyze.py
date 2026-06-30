@@ -4,19 +4,16 @@ import json
 import logging
 import os
 import re
-import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
-from typing import Annotated
 
-from mashumaro.mixins.yaml import DataClassYAMLMixin
 from mashumaro.types import Discriminator
-from mashumaro.config import BaseConfig
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
+from xaas.config import TargetTriple, BaseXaasConfigModel
 
 
 class Compiler(str, Enum):
@@ -27,6 +24,7 @@ class Compiler(str, Enum):
 
 class DivergenceReason(Enum):
     COMPILER = "compiler"
+    TARGET_TRIPLE = "target-triple"
     FLAGS = "flags"
     INCLUDES = "includes"
     DEFINITIONS = "definitions"
@@ -39,11 +37,15 @@ class DivergenceReason(Enum):
 
 
 @dataclass
-class CompileCommand(DataClassYAMLMixin):
+class CompileCommand(BaseXaasConfigModel):
+    class Config(BaseXaasConfigModel.Config):
+        discriminator = Discriminator(field="compiler_type", include_subtypes=True)
+
     source: str
     build_dir: str
     compiler: str
     compiler_type: Compiler
+    target_triple: TargetTriple | None = None
     flags: set = field(default_factory=set)
     includes: set = field(default_factory=set)
     optimizations: set = field(default_factory=set)
@@ -68,8 +70,8 @@ class NVCCCompileCommand(CompileCommand):
 
 
 @dataclass
-class ProjectDivergence(DataClassYAMLMixin):
-    class Config(BaseConfig):
+class ProjectDivergence(BaseXaasConfigModel):
+    class Config(BaseXaasConfigModel.Config):
         serialization_strategy = {
             set[str] | str: {
                 "deserialize": lambda x: x if isinstance(x, str) else set(x),
@@ -81,14 +83,11 @@ class ProjectDivergence(DataClassYAMLMixin):
 
 
 @dataclass
-class SourceFileStatus(DataClassYAMLMixin):
+class SourceFileStatus(BaseXaasConfigModel):
     """Status of a source file across all projects."""
 
     default_build: str
-    default_command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+    default_command: CompileCommand
     present_in_projects: set[str] = field(default_factory=set)
     divergent_projects: dict[str, ProjectDivergence] = field(default_factory=dict)
 
@@ -96,21 +95,15 @@ class SourceFileStatus(DataClassYAMLMixin):
 
 
 @dataclass
-class ProjectResult(DataClassYAMLMixin):
+class ProjectResult(BaseXaasConfigModel):
     """Results from analyzing a single project build."""
 
     # Target file -> compile command
-    files: dict[
-        str,
-        Annotated[
-            CompileCommand,
-            Discriminator(field="compiler_type", include_subtypes=True),
-        ],
-    ] = field(default_factory=dict)
+    files: dict[str, CompileCommand] = field(default_factory=dict)
 
 
 @dataclass
-class BuildComparison(DataClassYAMLMixin):
+class BuildComparison(BaseXaasConfigModel):
     """Comparison of builds across all projects."""
 
     source_files: dict[str, SourceFileStatus] = field(
@@ -122,7 +115,7 @@ class BuildComparison(DataClassYAMLMixin):
 
 
 @dataclass
-class Config(DataClassYAMLMixin):
+class Config(BaseXaasConfigModel):
     build: BuildConfig = field(default_factory=BuildConfig)
     build_comparison: BuildComparison = field(default_factory=BuildComparison)
 
@@ -261,6 +254,12 @@ class BuildAnalyzer(Action):
                 "removed": cmd1.compiler,
             }
 
+        if cmd1.target_triple is not cmd2.target_triple:
+            differences[DivergenceReason.TARGET_TRIPLE] = {
+                "added": cmd2.target_triple.value if cmd2.target_triple is not None else "",
+                "removed": cmd1.target_triple.value if cmd1.target_triple is not None else "",
+            }
+
         flags_diff1 = cmd2.flags - cmd1.flags
         flags_diff2 = cmd1.flags - cmd2.flags
         if flags_diff1 or flags_diff2:
@@ -276,17 +275,17 @@ class BuildAnalyzer(Action):
         # FIXME: added/removed is not the best match here
         # if we point to different build directories,
         # these could include different configs!
-        added = []
+        added = set()
         for incl in [*cmd1.includes, *cmd2.includes]:
             if "/build" in incl:
-                added.append(incl)
+                added.add(incl)
         if len(added) > 0:
             if DivergenceReason.INCLUDES in differences:
                 differences[DivergenceReason.INCLUDES]["added"].update(added)
             else:
                 differences[DivergenceReason.INCLUDES] = {
                     "added": added,
-                    "removed": [],
+                    "removed": set(),
                 }
 
         defines_diff1 = cmd2.definitions - cmd1.definitions
@@ -397,6 +396,16 @@ class BuildAnalyzer(Action):
             elif elem.startswith("-W"):
                 i += 1
                 continue
+            # Handle target triple
+            elif elem.startswith("--target=") or elem == "-target":
+                if result.target_triple is not None:
+                    raise RuntimeError(f"Target triple was already set to '{result.target_triple}'")
+
+                if elem == "-target":
+                    i += 1
+                    result.target_triple = TargetTriple(elems[i])
+                else:
+                    result.target_triple = TargetTriple(elem.removeprefix("--target="))
             else:
                 handled = False
 

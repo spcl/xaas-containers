@@ -117,14 +117,13 @@ class CPUTuning(Action):
                     )
                 )
 
-                build_dir = os.path.basename(build.directory)
                 target = "/build"
                 volumes.append(VolumeMount(source=os.path.realpath(build.directory), target=target))
 
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=config.build.docker_image_dev,
+                        image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner),
                         mounts=volumes,
                         remove=True,
                         detach=True,
@@ -269,9 +268,9 @@ class CPUTuning(Action):
 
         # FIXME: make into nice config
         get_features_cmd = [
-            "/opt/llvm/bin/opt",
+            "opt-19",
             "-load-pass-plugin",
-            "/tools/build/libReplaceTargetFeatures.so",
+            "/tools/llvm-features/libReplaceTargetFeatures.so",
             '-passes="replace-target-features"',
             "-query-features=true",
             ir_file,

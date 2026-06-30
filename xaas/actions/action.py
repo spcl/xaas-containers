@@ -1,7 +1,7 @@
 from abc import ABC
 from abc import abstractmethod
 
-from xaas.docker import Runner as DockerRunner
+from xaas.docker import DockerRunner
 from xaas.config import RunConfig
 from xaas.config import XaaSConfig
 
@@ -15,7 +15,7 @@ class Action(ABC):
         self._name = name
         self.description = description
         self.xaas_config = XaaSConfig()
-        self.docker_runner = DockerRunner(self.xaas_config.docker_repository)
+        self.docker_runner = DockerRunner()
 
     @abstractmethod
     def execute(self, run_config: RunConfig) -> bool:

@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.2
+# 1.2: RUN --mount
+
+ARG XAAS_IMAGE_PREFIX
+ARG DEBIAN_VERSION
+ARG LLVM_VERSION
+
+# Inheriting from the compiler image so that we get build-essential (which is used by the CUDA toolchain)
+FROM ${XAAS_IMAGE_PREFIX}compiler-debian${DEBIAN_VERSION}-llvm${LLVM_VERSION} AS builder
+
+ARG FFTW3_VERSION
+ARG FFTW3_SIMD_BUILD_ARGS
+
+RUN --mount=type=tmpfs,target=/tmp \
+    curl https://fftw.org/fftw-${FFTW3_VERSION}.tar.gz | tar zx \
+    && cd fftw-${FFTW3_VERSION} \
+    && ./configure --with-pic --enable-float --enable-threads ${FFTW3_SIMD_BUILD_ARGS} --prefix=/opt/fftw3 \
+    && make V=1 -j$( nproc ) \
+    && make install
+
+
+FROM scratch
+COPY --from=builder /opt/fftw3 /opt/fftw3

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import cast, Annotated
+from typing import cast
 from collections import defaultdict, namedtuple
 from itertools import islice
-from enum import Enum
 from hashlib import md5
 from pathlib import Path
 from mmap import ACCESS_READ, mmap
@@ -13,8 +12,6 @@ from dataclasses import dataclass, field
 
 import tqdm
 from docker.models.containers import Container
-from mashumaro.mixins.yaml import DataClassYAMLMixin
-from mashumaro.types import Discriminator
 
 from xaas.actions.action import Action
 from xaas.actions.build import Config as BuildConfig
@@ -28,23 +25,21 @@ from xaas.actions.analyze import (
     SourceFileStatus,
     ProjectDivergence,
 )
+from xaas.config import BaseXaasConfigModel
 from xaas.docker import VolumeMount
 
 from concurrent.futures import ThreadPoolExecutor, as_completed, process
 
 
 @dataclass
-class IRFileStatus(DataClassYAMLMixin):
+class IRFileStatus(BaseXaasConfigModel):
     has_omp: bool = False
     file: str | None = None
 
 
 @dataclass
-class FileStatus(DataClassYAMLMixin):
-    command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+class FileStatus(BaseXaasConfigModel):
+    command: CompileCommand
     cmd_differences: ProjectDivergence
     hash: str | None = None
     ir_file: IRFileStatus = field(default_factory=IRFileStatus)
@@ -54,12 +49,9 @@ class FileStatus(DataClassYAMLMixin):
 
 
 @dataclass
-class ProcessedResults(DataClassYAMLMixin):
+class ProcessedResults(BaseXaasConfigModel):
     baseline_project: str
-    baseline_command: Annotated[
-        CompileCommand,
-        Discriminator(field="compiler_type", include_subtypes=True),
-    ]
+    baseline_command: CompileCommand
     # Mapping: hash -> list of [(config, path)]
     # We use to decide when two file with the same hash are compatible with each other
     ir_files: dict[str, list[tuple[ProjectDivergence, IRFileStatus]]] = field(default_factory=dict)
@@ -67,7 +59,7 @@ class ProcessedResults(DataClassYAMLMixin):
 
 
 @dataclass
-class PreprocessingResult(DataClassYAMLMixin):
+class PreprocessingResult(BaseXaasConfigModel):
     build: BuildConfig = field(default_factory=BuildConfig)
     targets: dict[str, ProcessedResults] = field(default_factory=dict)
 
@@ -181,7 +173,7 @@ class ClangPreprocesser(Action):
                 containers[build.directory] = Container(
                     self.docker_runner.run(
                         command="/bin/bash",
-                        image=build.docker_image,
+                        image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner),
                         mounts=volumes,
                         remove=True,
                         detach=True,
@@ -302,13 +294,7 @@ class ClangPreprocesser(Action):
 
                             original_processed_file = next(result_iter)
                             if not original_processed_file:
-                                logging.error("Skip because of an error")
-
-                                # drop results
-                                for _ in range(len(status.divergent_projects)):
-                                    next(result_iter)
-
-                                continue
+                                raise RuntimeError(f"Original processed file for {target} is None???")
 
                             success = []
                             for name, _ in status.divergent_projects.items():
@@ -346,15 +332,21 @@ class ClangPreprocesser(Action):
         command: CompileCommand,
         working_dir: str,
     ) -> tuple[str, bool] | None:
-        compiler = ""
+        """
+        :return: a tuple (the preprocessed file path, bool flag which is True if the file uses OpenMP)
+        """
+
+        compiler = None
 
         if command.compiler_type == Compiler.CLANG:
+            # TODO: jrabil: why are we not using the actual clang binary from command.compiler here?
             compiler = self.CLANG_PATH
         elif command.compiler_type == Compiler.NVCC:
             compiler = command.compiler
         else:
-            logging.error(f"Unsupported compiler {command.compiler}!")
-            return None
+            raise RuntimeError(f"Unsupported compiler {command.compiler}!")
+
+        assert compiler is not None, f"Couldn't determine compiler executable for {command}"
 
         """
         Remove comments.
@@ -362,19 +354,34 @@ class ClangPreprocesser(Action):
         Thus, enabling OpenMP will change the file even if does not affect anything.
         """
         preprocess_cmd = [compiler, "-E", "-P"]
+
+        # additional flags for target triple
+        if command.target_triple is not None:
+            if command.compiler_type == Compiler.CLANG:
+                preprocess_cmd.append(f"--target={command.target_triple.value}")
+            else:
+                raise RuntimeError(f"Don't know how to handle target triple {command.target_triple} using compiler {command.compiler_type}")
+
         # additional flags for CUDA compiler
-        if compiler.endswith("nvcc"):
+        if command.compiler_type == Compiler.NVCC:
             preprocess_cmd.extend(["-forward-unknown-to-host-compiler"])
 
         preprocess_cmd.extend(command.includes)
         preprocess_cmd.extend(command.definitions)
 
+        # this will include the '-x cu' flag if necessary
+        preprocess_cmd.extend(command.others)
+
         """
             For CUDA, the additional includes can be hidden in response files.
         """
         if command.compiler_type == Compiler.NVCC:
-            for file in cast(NVCCCompileCommand, command).response_files:
+            nvcc_command = cast(NVCCCompileCommand, command)
+            for file in nvcc_command.response_files:
                 preprocess_cmd.append(f"--options-file={file}")
+
+            if nvcc_command.ccbin is not None:
+                preprocess_cmd.append(f"-ccbin={nvcc_command.ccbin}")
 
         # OpenMP adds its own preprocessing directive
         preprocess_cmd.extend(command.flags)
@@ -391,14 +398,12 @@ class ClangPreprocesser(Action):
         if not self.dry_run:
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
-                logging.error(f"Error preprocessing {target}: {output}")
-                logging.error(f"Command {cmd}")
-                return None
+                logging.error(f"Error preprocessing {target}: {output.decode("utf-8")}")
+                raise RuntimeError(f"Error preprocessing {target}:\n\t{output.decode("utf-8")}\n\tCommand: {cmd}")
         else:
             # create empty path to allow other parts of the pipeline to work.
-            code, output = self.docker_runner.exec_run(
-                container, ["/bin/bash", "-c", f"echo test > {preprocessed_file}"], working_dir
-            )
+            with open(preprocessed_file, "w") as f:
+                f.write("test\n")
 
         if not contains_openmp_flag(baseline_command.flags) and not contains_openmp_flag(
             command.flags
@@ -414,7 +419,7 @@ class ClangPreprocesser(Action):
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error OMP processing {target}: {output}")
-                return None
+                raise RuntimeError(f"Error OMP processing {target}:\n\t{output}")
 
             return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
         else:

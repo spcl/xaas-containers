@@ -160,7 +160,7 @@ class IRCompiler(Action):
 
             containers[build.directory] = self.docker_runner.run(
                 command="/bin/bash",
-                image=build.docker_image,
+                image=build.prepared_builder_image or build.builder_image.build_prepared_image(self.docker_runner),
                 mounts=volumes,
                 remove=False,
                 detach=True,
@@ -445,9 +445,9 @@ class IRCompiler(Action):
         code, output = self.docker_runner.exec_run(container, ["/bin/bash", "-c", ir_cmd], "/build")
 
         if code != 0:
-            logging.error(f"Error generating IR for {baseline_command.source}: {output}")
+            logging.error(f"Error generating IR for {baseline_command.source}: {output.decode("utf-8")}")
             logging.error(f"Failing command {ir_cmd}")
-            return None
+            raise RuntimeError(f"Error generating IR for {baseline_command.source}:\n\t{output.decode("utf-8")}\n\tCommand: {ir_cmd}")
 
         logging.debug(f"Successfully generated IR for {baseline_command.source}")
         return ir_target
@@ -492,7 +492,10 @@ class CUDA:
         ir_cmd = CUDA.remove_all_gencode_options(ir_cmd)
 
         # Add our standardized gencode options
-        standardized_gencodes = CUDA.generate_standardized_gencode_options()
+        #standardized_gencodes = CUDA.generate_standardized_gencode_options()
+        #standardized_gencodes = CUDA.generate_config_based_gencode_options(cmd)
+        standardized_gencodes = CUDA.generate_all_gencode_options()
+
         ir_cmd = f"{ir_cmd} {' '.join(standardized_gencodes)}"
         logging.debug(f"Added standardized CUDA gencode options: {len(standardized_gencodes)}")
 
@@ -560,3 +563,28 @@ class CUDA:
             )
 
         return gencode_options
+
+    @staticmethod
+    def generate_config_based_gencode_options(cmd: NVCCCompileCommand) -> list[str]:
+        """
+        Generate our standardized set of gencode options for all configured architectures.
+        This is intended to replace any existing gencode options with our set.
+        """
+        gencode_options = []
+
+        # Add SASS targets for all requested architectures
+        gencode_options.extend(f"-gencode=arch=compute_{arch},code=sm_{arch}" for arch in cmd.gencode_sass)
+
+        # Add PTX targets for all requested architectures
+        gencode_options.extend(f"-gencode=arch=compute_{version},code=compute_{version}" for version in cmd.gencode_ptx)
+
+        return gencode_options
+
+    @staticmethod
+    def generate_all_gencode_options() -> list[str]:
+        """
+        Generate our standardized set of gencode options for all supported architectures.
+        This is intended to replace any existing gencode options with our set.
+        """
+
+        return ["--gpu-architecture=all"]

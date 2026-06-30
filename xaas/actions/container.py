@@ -11,7 +11,8 @@ from xaas.actions.analyze import DivergenceReason, CompileCommand, Compiler, NVC
 from xaas.actions.build import Config as BuildConfig
 from xaas.actions.ir import PreprocessingResult
 from xaas.actions.preprocess import FileStatus
-from xaas.config import XaaSConfig
+from xaas.docker import DockerBuildFeatures
+from xaas.util.dockerfile import DockerfileBuilder, DockerfileStage, CopyStep
 
 
 class DockerImageBuilder(Action):
@@ -20,12 +21,10 @@ class DockerImageBuilder(Action):
             name="dockerimagebuilder",
             description="Create a Docker image containing all build directories for IR analysis.",
         )
-        self.BASE_IMAGE = "spcleth/xaas:llvm-19"
-        self.BASE_IMAGE_DEV = "spcleth/xaas:llvm-19-dev"
+        self.BASE_IMAGE = "spcleth/xaas:builder-19-cross"
 
-        self.OPT_PATH_DEV = "/opt/llvm/bin/opt"
-
-        self.CLANG_PATH = "/usr/bin/c++"
+        self.OPT_PATH_DEV = "opt-19"
+        self.CLANG_PATH = "clang++-19"
 
         self.docker_repository = docker_repository
 
@@ -37,18 +36,18 @@ class DockerImageBuilder(Action):
 
         build_dir = os.path.join(config.build.working_directory, os.path.pardir)
 
-        uses_dev = False
+        docker_builder = self.docker_runner.try_get_buildkit_builder() or self.docker_runner
+
         for build in config.build.build_results:
             file_path = os.path.join(build.directory, "build.sh")
             with open(file_path, "w") as f:
-                lines, dev_flag = self._generate_bashscript(build.directory, config)
+                lines = self._generate_bashscript(build.directory, config)
                 f.write(lines)
-                uses_dev |= dev_flag
 
             logging.info(f"[{self.name}] Created build script in {file_path}")
 
         dockerfile_path = os.path.join(build_dir, "Dockerfile")
-        dockerfile_content = self._generate_dockerfile(build_dir, config, uses_dev)
+        dockerfile_content = self._generate_dockerfile(build_dir, config, docker_builder.get_build_features())
 
         with open(dockerfile_path, "w") as f:
             f.write(dockerfile_content)
@@ -56,7 +55,11 @@ class DockerImageBuilder(Action):
 
         logging.info(f"[{self.name}] Building Docker image: {image_name}, in {build_dir}")
 
-        self.docker_runner.build(dockerfile="Dockerfile", path=build_dir, tag=image_name)
+        docker_builder.build(
+            dockerfile="Dockerfile", path=build_dir, tag=image_name,
+            labels={'xaas.BuildConfig': config.build.to_yaml()},
+            show_progress=True,
+        )
 
         logging.info(f"[{self.name}] Successfully built Docker image {image_name}")
 
@@ -67,10 +70,8 @@ class DockerImageBuilder(Action):
 
     def _generate_bashscript(
         self, project_dir: str, config: PreprocessingResult
-    ) -> tuple[str, bool]:
+    ) -> str:
         lines = ["#!/bin/bash", ""]
-
-        uses_dev = False
 
         project_file = os.path.join(project_dir, "compile_commands.json")
         try:
@@ -121,14 +122,13 @@ class DockerImageBuilder(Action):
 
             if len(result.projects[project_dir].cpu_tuning) > 0:
                 opt_cmd = self._cpu_tune(ir_file, result.projects[project_dir], config.build)
-                uses_dev = True
 
                 lines.append(f"{opt_cmd} && {ir_cmd}")
             else:
                 lines.append(ir_cmd)
             lines.append("")
 
-        return ("\n".join(lines), uses_dev)
+        return "\n".join(lines)
 
     def _cpu_tune(
         self,
@@ -146,7 +146,7 @@ class DockerImageBuilder(Action):
         # (1) We run the custom opt pass to replace targets
         # (2) We run optimizations (together with the previous one)
         # FIXME: hardcoding
-        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/build/libReplaceTargetFeatures.so "
+        cmd = f"{self.OPT_PATH_DEV} -load-pass-plugin /tools/llvm-features/libReplaceTargetFeatures.so "
         cmd += '-passes="replace-target-features" '
 
         if project.cpu_tuning:
@@ -170,66 +170,30 @@ class DockerImageBuilder(Action):
         return cmd
 
     def _generate_dockerfile(
-        self, build_dir: str, config: PreprocessingResult, uses_dev_image: bool
+        self, build_dir: str, config: PreprocessingResult, build_features: DockerBuildFeatures,
     ) -> str:
-        lines = []
+        dockerfile_builder = DockerfileBuilder()
 
-        # FIXME: full dev image!
-        if uses_dev_image:
-            lines.append(f"FROM {self.BASE_IMAGE_DEV} AS llvm-dev")
-            lines.append("FROM spcleth/xaas:features-analyzer-dev as features-analyzer")
-
-        lines.extend(
-            [
-                f"FROM {self.BASE_IMAGE}",
-                "",
+        terminal_stage = DockerfileStage(
+            from_context="scratch",
+            steps=[
+                CopyStep(
+                    source=os.path.relpath(config.build.source_directory, build_dir),
+                    target="/source",
+                ),
+                CopyStep(
+                    source=os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir),
+                    target="/irs",
+                ),
+                *[CopyStep(
+                    source=os.path.relpath(build.directory, build_dir),
+                    target=f"/builds/{Path(build.directory).name}",
+                ) for i, build in enumerate(config.build.build_results)],
             ]
         )
 
-        # FIXME: full dev image!
-        if uses_dev_image:
-            lines.append("COPY --from=llvm-dev /opt/llvm /opt/llvm")
-            lines.append("COPY --from=features-analyzer /tools /tools")
-
-        lines.extend(
-            [
-                "# Add build directories for IR analysis",
-                "WORKDIR /builds/",
-                "RUN apt-get update && apt-get install -y --no-install-recommends parallel && rm -rf /var/lib/apt/lists/*",
-            ]
-        )
-
-        for i, build in enumerate(config.build.build_results):
-            build_path = os.path.relpath(build.directory, build_dir)
-            build_name = Path(build.directory).name
-
-            lines.append(f"# Build {i + 1}: {build_name}")
-            lines.append(f"COPY {build_path} /builds/{build_name}")
-
-        """
-            Necessary for the build to finish.
-        """
-        source_path = os.path.relpath(config.build.source_directory, build_dir)
-        lines.append("")
-        lines.append("# Add source code")
-        lines.append(f"COPY {source_path} /source")
-
-        source_path = os.path.relpath(config.build.source_directory)
-        lines.append("")
-        lines.append("# Add IR files")
-        lines.append(
-            f"COPY {os.path.relpath(os.path.join(config.build.working_directory, 'irs'), build_dir)} /irs"
-        )
-
-        lines.append("")
-        lines.append("# Set environment variables")
-        lines.append(f"ENV PROJECT_NAME={config.build.project_name}")
-
-        lines.append("")
-        lines.append("# Default command")
-        lines.append('CMD ["bash"]')
-
-        return "\n".join(lines)
+        dockerfile = dockerfile_builder.build(terminal_stage)
+        return dockerfile.to_str()
 
     def validate(self, config: PreprocessingResult) -> bool:
         work_dir = config.build.working_directory

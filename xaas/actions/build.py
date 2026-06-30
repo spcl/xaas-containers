@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+import itertools
 import logging
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from dataclasses import field
+from functools import reduce
+from typing import Generator
 
 from xaas.actions.action import Action
 from xaas.docker import VolumeMount
-from xaas.config import BuildResult
+from xaas.config import BuildResult, TargetTriple, BuildSystemArguments, PartialRunConfig, ArgumentsVariableEntry, DockerLayerPrepared, DerivedDockerImageDescriptor
 from xaas.config import CPUArchitecture
 from xaas.config import BuildSystem
 from xaas.config import FeatureType
-from xaas.config import XaaSConfig
 from xaas.config import RunConfig
-from xaas.config import FeatureSelectionType, LayerDepConfig
 
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 
@@ -29,69 +31,19 @@ class CPUTuningFeatures(DataClassYAMLMixin):
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
-    docker_image: str = "builder"
-    docker_image_dev: str = "builder-19-dev"
     target_flags: list[tuple[set, CPUTuningFeatures]] = field(default_factory=list)
-
-    @staticmethod
-    def load(config_path: str) -> Config:
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Runtime configuration file not found: {config_path}")
-
-        with open(config_path) as f:
-            return Config.from_yaml(f)
 
 
 class BuildGenerator(Action):
     def __init__(self):
         super().__init__(name="build", description="Builds the project with specified features")
 
-    def _generate_docker_image(
-        self,
-        docker_image_dev: str,
-        layers_deps: dict[str, LayerDepConfig],
-        cpu_architecture: CPUArchitecture,
-        build_option: dict[str, str],
-    ) -> str:
-        lines = []
-
-        name_suffix = []
-
-        dep_names = []
-        for dep_name, dependency in layers_deps.items():
-            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep_name]
-
-            name = dep_cfg.name.replace("${version}", dependency.version)
-            for arg, value in dependency.arg_mapping.items():
-                if not dep_cfg.arg_mapping:
-                    continue
-
-                if arg in dep_cfg.arg_mapping:
-                    flag_name = dep_cfg.arg_mapping[arg].flag_name
-                    flag_value = build_option[arg]
-
-                    name = name.replace(f"${{{flag_name}}}", flag_value)
-            dep_names.append((dep_name, name))
-            name_suffix.append(name)
-
-            lines.append(f"FROM {XaaSConfig().docker_repository}:{name} as {name}")
-
-        lines.append(f"FROM {XaaSConfig().docker_repository}:{docker_image_dev}")
-
-        for dep, dep_name in dep_names:
-            dep_cfg = XaaSConfig().layers.layers_deps[cpu_architecture][dep]
-            lines.append(
-                f"COPY --from={dep_name} {dep_cfg.build_location} {dep_cfg.build_location}"
-            )
-
-        return ["\n".join(lines), name_suffix]
-
     def execute(self, run_config: RunConfig) -> bool:
         logging.info(f"[{self.name}] Building project {run_config.project_name}")
         config_obj = Config.from_instance(run_config)
 
         # simple check for cuda runtime dependency
-        if FeatureType.CUDA in config_obj.features_boolean:
+        if config_obj.may_contain_feature_boolean(FeatureType.CUDA):
             output = subprocess.run(
                 f"grep CUDART_VERSION -nrw {config_obj.source_directory}",
                 capture_output=True,
@@ -127,151 +79,105 @@ class BuildGenerator(Action):
         return True
 
     @staticmethod
-    def _generate_subsets(
-        features: list[FeatureType],
-    ) -> list[list[tuple[FeatureType, FeatureType]]]:
-        features_count = len(features)
-        num_subsets = 2**features_count
-        all_subsets = []
+    def _all_feature_permutations(config: PartialRunConfig) -> Generator[tuple[dict[FeatureType, bool], dict[str, str]], None, None]:
+        permutations_boolean = [
+            [tuple([feature, False]), tuple([feature, True])] for feature in config.features_boolean.keys()
+        ]
 
-        """
-        We generate all 2^n combinations by using bit positions of all integers from 0 to 2^n - 1
-        """
-        for i in range(num_subsets):
-            subset = []
-            subset_not_active = []
-            for j in range(features_count):
-                if i & (1 << j) > 0:
-                    subset.append(features[j])
-                else:
-                    subset_not_active.append(features[j])
-            all_subsets.append((subset, subset_not_active))
+        permutations_select = [
+            [ tuple([k, v]) for v in values ] for k, values in config.features_select.items()
+        ]
 
-        return all_subsets
+        for states_boolean in itertools.product(*permutations_boolean):
+            for states_select in itertools.product(*permutations_select):
+                yield dict(states_boolean), dict(states_select)
 
     @staticmethod
-    def generate_name(active: list[FeatureType], flags: tuple[str | None]):
-        active_name = "_".join([x.value for x in active])
-        flags_name = "_".join(flags) if flags[0] is not None else None
-
-        if flags_name is not None:
-            return f"{active_name}_{flags_name}"
-        else:
-            return active_name
+    def generate_name(effective_cpu_architecture: CPUArchitecture, states_boolean: dict[FeatureType, bool], states_select: dict[str, str]) -> str:
+        return "_".join([
+            effective_cpu_architecture.value,
+            *[x.value for x, state in states_boolean.items() if state],
+            *[f"{k}-{v}" for k, v in states_select.items()]
+        ])
 
     def _build_cmake(self, run_config: Config) -> bool:
-        build_dir = os.path.join(run_config.working_directory, "build")
-
-        # generate all combinations
-        subsets = self._generate_subsets(list(run_config.features_boolean.keys()))
-
         containers = []
-
-        options_names = []
-        options_select = []
-        options_select_flags = []
-
-        for key, selection in run_config.features_select.items():
-            for name, option in selection.items():
-                options_names.append((key,))
-                options_select.append((name,))
-                options_select_flags.append((option,))
-
-        if len(options_select) == 0:
-            options_names.append((None,))
-            options_select.append((None,))
-            options_select_flags.append((None,))
 
         # FIXME: test it for multiple combinations
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
-        for option_name, option, flag in zip(
-            options_names, options_select, options_select_flags, strict=True
-        ):
-            for active, nonactive in subsets:
-                build_dir = self.generate_name(active, option)
+        for effective_cpu_architecture in run_config.cpu_architectures:
+            effective_run_config = run_config.for_target(effective_cpu_architecture)
+            effective_base_builder_image, effective_base_runtime_image = effective_run_config.effective_docker_images()
 
-                docker_image = f"{run_config.docker_image_dev}"
+            for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
+                build_dir = self.generate_name(effective_cpu_architecture, states_boolean, states_select)
 
-                if len(run_config.layers_deps) > 0:
-                    logging.info(
-                        f"[{self.name}] Create custom builder image for {run_config.project_name}, {build_dir}"
-                    )
+                arguments = reduce(BuildSystemArguments.merge, [
+                    # universal build arguments
+                    effective_run_config.build_args,
 
-                    docker_image = f"{run_config.docker_image}-{run_config.project_name}"
-                    # FIXME: support multiple values
-                    settings = {}
-                    for k, v in zip(option_name, option, strict=True):
-                        settings[k] = v
+                    # include build arguments for the current feature selection
+                    *[ effective_run_config.features_boolean[feat].args_for_state(state) for feat, state in states_boolean.items() ],
+                    *[ effective_run_config.features_select[feat][state] for feat, state in states_select.items() ],
+                ])
 
-                    dockerfile_content, flag_names = self._generate_docker_image(
-                        run_config.docker_image_dev,
-                        run_config.layers_deps,
-                        run_config.cpu_architecture,
-                        settings,
-                    )
-                    name_suffix = "_".join(flag_names)
+                prepared_dependencies = [ d.prepare(effective_cpu_architecture, states_boolean, states_select) for d in arguments.dependencies ]
 
-                    dockerfile_path = os.path.join(working_dir, "images", name_suffix, "Dockerfile")
-                    os.makedirs(os.path.join(working_dir, "images", name_suffix), exist_ok=True)
+                builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
 
-                    with open(dockerfile_path, "w") as f:
-                        f.write(dockerfile_content)
-                    logging.info(f"[{self.name}] Created Dockerfile in {dockerfile_path}")
-
-                    logging.info(
-                        f"[{self.name}] Building Docker image: {run_config.docker_image}, in {working_dir}"
-                    )
-
-                    if len(name_suffix) > 0:
-                        docker_image = f"{docker_image}-{name_suffix}"
-
-                    self.docker_runner.build(
-                        dockerfile=os.path.join(name_suffix, "Dockerfile"),
-                        path=os.path.join(working_dir, "images"),
-                        tag=f"{XaaSConfig().docker_repository}:{docker_image}",
-                    )
-
-                    logging.info(f"[{self.name}] Successfully built Docker image {docker_image}")
+                # TODO: jrabil: podman supports running containers with bind mounts from other images, so if we ever add support for podman that could make builds SIGNIFICANTLY faster
+                prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner)
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")
                 os.makedirs(new_dir, exist_ok=True)
 
-                cmake_args = []
-                for arg in active:
-                    cmake_args.append(f"-D{run_config.features_boolean[arg][0]}")
-                for arg in nonactive:
-                    cmake_args.append(f"-D{run_config.features_boolean[arg][1]}")
-                for arg in run_config.additional_args:
-                    cmake_args.append(f"-D{arg}")
+                # environment variables from the build arguments should be defined when running CMake
+                # TODO: jrabil: we probably want to have the environment variables be defined during compilation as well, should we store them in BuildResult?
+                cmake_environment = ArgumentsVariableEntry.reduce_to_dict(arguments.environment, self.docker_runner.get_image_env(prepared_builder_image))
 
-                for arg in flag:
-                    if arg is not None:
-                        cmake_args.append(f"-D{arg}")
+                target_triple = TargetTriple.from_cpu_architecture(effective_cpu_architecture)
+
+                toolchain_file_name = "toolchain.cmake"
+                toolchain_lines = [
+                    "set(CMAKE_C_COMPILER clang)",
+                    "set(CMAKE_CXX_COMPILER clang++)",
+                    f"set(CMAKE_C_FLAGS_INIT \"--target={target_triple.value}\")",
+                    f"set(CMAKE_CXX_FLAGS_INIT \"--target={target_triple.value}\")",
+                ]
+                with open(os.path.join(new_dir, toolchain_file_name), "w") as toolchain_output:
+                    toolchain_output.write('\n'.join(toolchain_lines))
 
                 logging.info(
-                    f"Executing build in {new_dir}, image {docker_image}, combination: {active}"
+                    f"Executing build in {new_dir}, image {prepared_builder_image}, combination: {states_boolean | states_select}"
                 )
 
-                configure_cmd = [
-                    "bash",
-                    "-c",
-                    "'cmake",
+                cmake_command: list[str] = [
+                    "cmake",
+                    f"-DCMAKE_TOOLCHAIN_FILE=/build/{toolchain_file_name}",
                     "-DCMAKE_BUILD_TYPE=Release",
                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-                    *cmake_args,
+
+                    # properties from the build arguments should be defined as CMake variables
+                    *ArgumentsVariableEntry.reduce_to_cmake_args(arguments.property),
+
+                    # additional CMake arguments
+                    *arguments.arguments,
+
                     "-S",
                     "/source",
                     "-B",
                     "/build",
-                    "&&",
-                    "cd /build",
                 ]
-                for additional_step in run_config.additional_steps:
-                    configure_cmd.append(f"&& {additional_step}")
-                configure_cmd.append("'")
-                logging.info(f"[{self.name}] Running: {' '.join(configure_cmd)}")
+
+                configure_commands: list[list[str]] = [
+                    cmake_command,
+                    *run_config.additional_steps,
+                ]
+
+                configure_cmd: str = " && ".join([ shlex.join(command) for command in configure_commands ])
+                logging.info(f"[{self.name}] Running: {configure_cmd}")
 
                 volumes = []
                 volumes.append(
@@ -282,14 +188,22 @@ class BuildGenerator(Action):
                 volumes.append(VolumeMount(source=os.path.realpath(new_dir), target="/build"))
 
                 res = BuildResult(
-                    docker_image=docker_image, directory=new_dir, features_boolean=active
+                    directory=new_dir,
+                    features_boolean=states_boolean,
+                    features_select=states_select,
+
+                    builder_image=builder_image_desc,
+                    runtime_image=runtime_image_desc,
+
+                    prepared_builder_image=prepared_builder_image,
                 )
 
                 containers.append(
                     (
                         self.docker_runner.run(
-                            image=docker_image,
-                            command=" ".join(configure_cmd),
+                            image=prepared_builder_image,
+                            command=[ "bash", "-c", configure_cmd ],
+                            environment=cmake_environment,
                             mounts=volumes,
                             remove=False,
                             working_dir="/build",
