@@ -27,7 +27,6 @@ from xaas.config import (
     Language,
     XaaSConfig,
 )
-from xaas.docker import Runner as DockerRunner
 import xaas.source.utils as utils
 
 

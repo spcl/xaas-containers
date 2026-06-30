@@ -166,6 +166,7 @@ class BuildGenerator(Action):
 
                 builder_image_desc, runtime_image_desc = DerivedDockerImageDescriptor.create_builder_and_runtime(effective_base_builder_image, effective_base_runtime_image, prepared_dependencies)
 
+                # TODO: jrabil: podman supports running containers with bind mounts from other images, so if we ever add support for podman that could make builds SIGNIFICANTLY faster
                 prepared_builder_image = builder_image_desc.build_prepared_image(self.docker_runner)
 
                 new_dir = os.path.join(run_config.working_directory, "build", f"build_{build_dir}")

@@ -1,7 +1,7 @@
 from abc import ABC
 from abc import abstractmethod
 
-from xaas.docker import Runner as DockerRunner
+from xaas.docker import DockerRunner
 from xaas.config import RunConfig
 from xaas.config import XaaSConfig
 

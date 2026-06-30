@@ -10,7 +10,7 @@ from xaas.config import (
     ConfigSelection,
     Language,
 )
-from xaas.docker import Runner as DockerRunner
+from xaas.docker import DockerRunner
 from xaas.source.applications import (
     Application,
     ApplicationSpecialization,
@@ -26,7 +26,7 @@ import xaas.source.utils as utils
 class SourceContainerGenerator:
     def __init__(self, config: SourceContainerConfig):
         self._config = config
-        self._docker_runner = DockerRunner(self._config.docker_repository)
+        self._docker_runner = DockerRunner()
 
     def generate(self):
         dockerfile_creator = DockerfileCreator(
@@ -50,7 +50,7 @@ class SourceContainerDeployment:
     def __init__(self, config: SourceDeploymentConfig):
         self._config = config
         self._gemini_interface: GeminiInterface | None = None
-        self._docker_runner = DockerRunner(self._config.docker_repository)
+        self._docker_runner = DockerRunner()
 
         if self._config.mode == SourceContainerMode.AUTOMATED:
             self._gemini_interface = GeminiInterface()

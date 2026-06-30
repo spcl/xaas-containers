@@ -16,7 +16,7 @@ from mashumaro.config import BaseConfig
 from mashumaro.mixins.yaml import DataClassYAMLMixin
 from mashumaro.types import Discriminator
 
-from xaas.docker import Runner as DockerRunner
+from xaas.docker import DockerRunner
 from xaas.util.dict_utils import union_distinct, union_merge
 from xaas.util.dockerfile import DockerfileStage, DockerfileStep, EnvStep, CopyStep, RunStep, DockerfileBuilder
 

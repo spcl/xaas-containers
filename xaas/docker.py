@@ -133,13 +133,11 @@ class BuildxDispatcher(BuildInterface):
         return self.client.images.get(tag)
 
 
-class Runner(BuildInterface):
-    # TODO: jrabil: remove docker_repository argument
-    def __init__(self, docker_repository: str = ""):
+class DockerRunner(BuildInterface):
+    def __init__(self):
         self.client = docker.from_env()
         self.uid = os.getuid()
         self.gid = os.getgid()
-        self.docker_repository = docker_repository
 
     def try_get_buildkit_builder(self) -> BuildInterface | None:
         try:
@@ -215,10 +213,6 @@ class Runner(BuildInterface):
                 for mount in mounts:
                     volumes[mount.source] = {"bind": mount.target, "mode": mount.mode}
             logging.debug(f"Starting container from image '{image}'")
-
-            # TODO: jrabil: we should make the base docker image be defined explicitly
-            if self.docker_repository:
-                image = f"{self.docker_repository}:{image}"
 
             envs = {
                 "USER_ID": str(self.uid),
