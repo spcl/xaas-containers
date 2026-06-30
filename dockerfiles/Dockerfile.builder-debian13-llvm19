@@ -59,13 +59,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         crossbuild-essential-arm64 \
         crossbuild-essential-amd64
 
-# Install libgomp for cross-compilation with GCC+OpenMP
-# TODO: this probably isn't needed, since we don't compile using GCC and Clang seems to be incompatible with libgomp
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,target=/var/lib/apt,sharing=locked --mount=type=tmpfs,target=/var/log/apt \
-    eatmydata apt-get update && eatmydata apt-get install --yes --no-install-recommends \
-        libgomp1-arm64-cross \
-        libgomp1-amd64-cross
-
 # Install libomp5-19 shared libraries for cross-compilation with Clang+OpenMP
 RUN --mount=type=tmpfs,target=/var/cache/apt --mount=type=tmpfs,target=/var/lib/apt --mount=type=tmpfs,target=/var/log/apt \
         --mount=type=tmpfs,target=/tmp \
