@@ -1,7 +1,8 @@
-ir_image: gromacs-ir
+ir_image: docker.io/spcleth/xaas-artifact:gromacs-ir
+cpu_architecture: x86_64
 working_directory: deployment
+docker_repository: docker.io/spcleth/xaas-artifact
 features_select:
-  VECTORIZATION: SSE4.1
+  VECTORIZATION: AVX2_256
 features_boolean:
-  MPI: False
-  OPENMP: True
+  CUDA: True

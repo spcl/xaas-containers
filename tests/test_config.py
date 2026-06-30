@@ -1,7 +1,7 @@
 import pytest
 import yaml
 
-from xaas.config import XaaSConfig
+from xaas.config import XaaSConfig, _variable_expand
 
 
 @pytest.fixture
@@ -26,8 +26,9 @@ def test_load_config(resources: tuple[XaaSConfig, dict]) -> None:
     config.initialize(XaaSConfig.DEFAULT_CONFIGURATION)
 
     # check also singleton property
-    assert resources[0].default_builder_image == resources[1]["default_builder_image"]
-    assert resources[0].default_runtime_image == resources[1]["default_runtime_image"]
+    assert resources[0].config_vars == resources[1]["config_vars"]
+    assert resources[0].default_builder_image == _variable_expand(resources[1]["default_builder_image"], resources[1]["config_vars"])
+    assert resources[0].default_runtime_image == _variable_expand(resources[1]["default_runtime_image"], resources[1]["config_vars"])
     assert resources[0].ir_type.value == resources[1]["ir_type"]
     assert resources[0].parallelism_level == resources[1]["parallelism_level"]
 

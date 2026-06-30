@@ -1,5 +1,7 @@
-ir_image: LULESH-ir
+ir_image: "docker.io/spcleth/xaas-artifact:lulesh-ir"
 working_directory: deployment
+cpu_architecture: x86_64
+docker_repository: "docker.io/spcleth/xaas-artifact"
 features_select: {}
 features_boolean:
   MPI: False

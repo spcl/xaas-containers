@@ -19,7 +19,7 @@ def test_load_lulesh() -> None:
 
     assert cfg.working_directory == "lulesh-builds"
     assert cfg.source_directory == "LULESH"
-    assert cfg.project_name == "LULESH"
+    assert cfg.project_name == "lulesh"
     assert cfg.build_system == BuildSystem.CMAKE
     assert cfg.all_targets.features_boolean[FeatureType.MPI].enabled.property == {"WITH_MPI": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "ON")}
     assert cfg.all_targets.features_boolean[FeatureType.MPI].disabled.property == {"WITH_MPI": ArgumentsVariableEntry(ArgumentsVariableEntryType.SET, "OFF")}
