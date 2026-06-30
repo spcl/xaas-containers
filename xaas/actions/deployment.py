@@ -19,7 +19,7 @@ class Deployment(Action):
         self.parallel_workers = parallel_workers
 
     def execute(self, config: DeployConfig) -> bool:
-        name = BuildGenerator.generate_name(config.features_boolean, config.features_select)
+        name = BuildGenerator.generate_name(config.cpu_architecture, config.features_boolean, config.features_select)
 
         docker_builder = self.docker_runner.try_get_buildkit_builder() or self.docker_runner
 

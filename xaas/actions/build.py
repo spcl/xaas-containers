@@ -28,7 +28,6 @@ class CPUTuningFeatures(DataClassYAMLMixin):
     tune_cpu: str | None = None
 
 
-# TODO: jrabil: i don't think this stuff should extend from RunConfig, it should be a separate config file...
 @dataclass
 class Config(RunConfig):
     build_results: list[BuildResult] = field(default_factory=list)
@@ -94,8 +93,9 @@ class BuildGenerator(Action):
                 yield dict(states_boolean), dict(states_select)
 
     @staticmethod
-    def generate_name(states_boolean: dict[FeatureType, bool], states_select: dict[str, str]) -> str:
+    def generate_name(effective_cpu_architecture: CPUArchitecture, states_boolean: dict[FeatureType, bool], states_select: dict[str, str]) -> str:
         return "_".join([
+            effective_cpu_architecture.value,
             *[x.value for x, state in states_boolean.items() if state],
             *[f"{k}-{v}" for k, v in states_select.items()]
         ])
@@ -107,15 +107,12 @@ class BuildGenerator(Action):
         working_dir = os.path.join(run_config.working_directory)
         os.makedirs(working_dir, exist_ok=True)
 
-        #this pointless if is here because we're going to add another outer loop here eventually and i want to avoid messing up the indentation
-        if True:
-            # TODO: jrabil: automatically build for multiple configurations
-            effective_cpu_architecture = run_config.cpu_architecture
+        for effective_cpu_architecture in run_config.cpu_architectures:
             effective_run_config = run_config.for_target(effective_cpu_architecture)
             effective_base_builder_image, effective_base_runtime_image = effective_run_config.effective_docker_images()
 
             for states_boolean, states_select in self._all_feature_permutations(effective_run_config):
-                build_dir = self.generate_name(states_boolean, states_select)
+                build_dir = self.generate_name(effective_cpu_architecture, states_boolean, states_select)
 
                 arguments = reduce(BuildSystemArguments.merge, [
                     # universal build arguments

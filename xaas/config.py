@@ -518,7 +518,7 @@ class RunConfig(DataClassYAMLMixin):
     project_name: str
     build_system: BuildSystem
     source_directory: str
-    cpu_architecture: CPUArchitecture
+    cpu_architectures: list[CPUArchitecture]
     all_targets: PartialRunConfig
     cpu_specific: dict[CPUArchitecture, PartialRunConfig]
     additional_steps: list[list[str]]
