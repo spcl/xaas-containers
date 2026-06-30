@@ -447,9 +447,7 @@ class IRCompiler(Action):
         if code != 0:
             logging.error(f"Error generating IR for {baseline_command.source}: {output.decode("utf-8")}")
             logging.error(f"Failing command {ir_cmd}")
-            # TODO: jrabil: raise errors instead of failing silently
             raise RuntimeError(f"Error generating IR for {baseline_command.source}:\n\t{output.decode("utf-8")}\n\tCommand: {ir_cmd}")
-            return None
 
         logging.debug(f"Successfully generated IR for {baseline_command.source}")
         return ir_target

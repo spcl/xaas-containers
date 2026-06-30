@@ -294,16 +294,7 @@ class ClangPreprocesser(Action):
 
                             original_processed_file = next(result_iter)
                             if not original_processed_file:
-                                # TODO: jrabil: raise errors instead of failing silently
                                 raise RuntimeError(f"Original processed file for {target} is None???")
-
-                                logging.error("Skip because of an error")
-
-                                # drop results
-                                for _ in range(len(status.divergent_projects)):
-                                    next(result_iter)
-
-                                continue
 
                             success = []
                             for name, _ in status.divergent_projects.items():
@@ -353,11 +344,7 @@ class ClangPreprocesser(Action):
         elif command.compiler_type == Compiler.NVCC:
             compiler = command.compiler
         else:
-            logging.error(f"Unsupported compiler {command.compiler}!")
-            # TODO: jrabil: raise errors instead of failing silently
             raise RuntimeError(f"Unsupported compiler {command.compiler}!")
-
-            return None
 
         assert compiler is not None, f"Couldn't determine compiler executable for {command}"
 
@@ -412,10 +399,7 @@ class ClangPreprocesser(Action):
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error preprocessing {target}: {output.decode("utf-8")}")
-                # TODO: jrabil: raise errors instead of failing silently
                 raise RuntimeError(f"Error preprocessing {target}:\n\t{output.decode("utf-8")}\n\tCommand: {cmd}")
-
-                return None
         else:
             # create empty path to allow other parts of the pipeline to work.
             with open(preprocessed_file, "w") as f:
@@ -435,10 +419,7 @@ class ClangPreprocesser(Action):
             code, output = self.docker_runner.exec_run(container, cmd, working_dir)
             if code != 0:
                 logging.error(f"Error OMP processing {target}: {output}")
-                # TODO: jrabil: raise errors instead of failing silently
                 raise RuntimeError(f"Error OMP processing {target}:\n\t{output}")
-
-                return None
 
             return preprocessed_file, "XAAS_OMP_FOUND" in output.decode("utf-8")
         else:
