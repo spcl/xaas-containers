@@ -219,7 +219,6 @@ class ArgumentsVariableEntry(BaseXaasConfigModel):
 @dataclass
 class DockerLayerVersion(BaseXaasConfigModel):
     flag_name: str
-    build_args: dict[str, str]
 
 
 @dataclass

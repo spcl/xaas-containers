@@ -45,13 +45,6 @@ layers:
       arg_mapping:
         VECTORIZATION:
           flag_name: SIMD_FLAG
-          build_args:
-            SSE2: --enable-sse2
-            SSE4.1: --enable-sse2
-            AVX_256: --enable-sse2 --enable-avx --enable-avx2
-            AVX2_128: --enable-sse2 --enable-avx --enable-avx2
-            AVX2_256: --enable-sse2 --enable-avx --enable-avx2
-            AVX_512: --enable-sse2 --enable-avx --enable-avx2 --enable-avx512
     oneapi:
       versions: ['2021.3.0', '2025.0']
       version_arg: ONEAPI_VERSION
@@ -62,9 +55,6 @@ layers:
       arg_mapping:
         ONEAPI_VERSION:
           flag_name: ONEAPI_VERSION
-          build_args:
-            2021.3.0: intel-basekit-2021.3.0
-            2025.0: intel-oneapi-base-toolkit-2025.0
   arm64:
     cuda:
       versions: ['12.6']
